@@ -1,0 +1,79 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emergency Vehicle Route Planner</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+
+<body>
+
+  <!-- Header -->
+  <header>🚨 Emergency Vehicle Route Planner</header>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <ul>
+      <li><a href="#">Home</a></li>
+      <li><a href="#">Services</a></li>
+      <li><a href="#">About</a></li>
+      <li><a href="#">Contact</a></li>
+    </ul>
+  </nav>
+
+  <!-- Controls Panel -->
+  <div class="controls">
+    <div class="input-group">
+      <i class="fas fa-map-marker-alt"></i>
+      <input type="text" id="start" placeholder="Enter Start Location">
+    </div>
+
+    <div class="input-group">
+      <i class="fas fa-location-dot"></i>
+      <input type="text" id="destination" placeholder="Enter Destination">
+    </div>
+
+    <div class="input-group">
+      <i class="fas fa-car"></i>
+      <select id="vehicle">
+        <option value="ambulance">🚑 Ambulance</option>
+        <option value="firetruck">🚒 Fire Truck</option>
+        <option value="police">🚓 Police Vehicle</option>
+      </select>
+    </div>
+
+    <button class="btn" onclick="showMessage()"><i class="fas fa-route"></i> Find Fastest Route</button>
+  </div>
+
+  <!-- Popup Modal -->
+  <div id="popup" class="popup">
+    <div class="popup-content">
+      <span class="close" onclick="closePopup()">&times;</span>
+      <p id="popup-text"></p>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Footer -->
+  <footer>
+    &copy; 2025 Emergency Planner | Powered by AI & GPS Data
+  </footer>
+
+  <!-- JS -->
+  <script src="script.js"></script>
+
+  <!-- Google Maps API -->
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAX2h2t5DSv4TwXmpMbUZEdMklqWK6EaGs&callback=initMap">
+    </script>
+
+</body>
+
+</html>
