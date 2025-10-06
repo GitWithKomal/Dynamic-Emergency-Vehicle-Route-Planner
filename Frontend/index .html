@@ -1,73 +1,132 @@
-
-
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Emergency Vehicle Route Planner</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dynamic Emergency Vehicle Route Planner</title>
+  <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
 <body>
-
-  <!-- Header -->
-  <header>🚨 Emergency Vehicle Route Planner</header>
+  <header>🚨 Dynamic Emergency Vehicle Route Planner</header>
 
   <!-- Navbar -->
   <nav class="navbar">
     <ul>
-      <li><a href="#">Home</a></li>
-      <li><a href="#">Services</a></li>
-      <li><a href="#">About</a></li>
-      <li><a href="#">Contact</a></li>
+      <li><a href="#home">Home</a></li>
+      <li><a href="#mapview">Map</a></li>
+      <li><a href="#contacts">Contacts</a></li>
+      <li><a href="#about">About</a></li>
     </ul>
   </nav>
 
-  <!-- Controls Panel -->
-  <div class="controls">
-    <div class="input-group">
-      <i class="fas fa-map-marker-alt"></i>
-      <input type="text" id="start" placeholder="Enter Start Location">
+  <main id="home">
+    <div class="controls">
+      <div class="input-group">
+        <i class="fas fa-map-marker-alt"></i>
+        <input id="start" type="text" placeholder="Enter Pickup Location or click 📍" />
+        <button class="gps-btn" onclick="getLocation()" title="Use current location">📍</button>
+      </div>
+
+      <div class="input-group">
+        <i class="fas fa-location-dot"></i>
+        <input id="destination" type="text" placeholder="Enter Destination (e.g., hospital address)" />
+      </div>
+
+      <div class="input-group">
+        <i class="fas fa-car"></i>
+        <select id="vehicle">
+          <option value="ambulance">🚑 Ambulance</option>
+          <option value="firetruck">🚒 Fire Truck</option>
+          <option value="police">🚓 Police Vehicle</option>
+        </select>
+      </div>
+
+      <div class="control-row">
+        <button class="btn" onclick="findRoute()"> <i class="fas fa-route"></i> Find Fastest Route</button>
+        <button class="btn danger" onclick="sendSOS()"> <i class="fas fa-bell"></i> SOS</button>
+      </div>
+
+      <div id="route-info" class="route-info" hidden>
+        <p id="route-summary"></p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Map Section -->
+  <section id="mapview">
+    <div id="map"></div>
+  </section>
+
+  <!-- Contacts (simple) -->
+  <section id="contacts" class="info-section">
+    <h2>🚨 Emergency Contacts</h2>
+    <div id="emergency-contacts" class="contacts-container"></div>
+  </section>
+
+
+  <section id="about" class="info-section about-section">
+    <h2>💡 About </h2>
+
+    <div class="about-content">
+      <div class="about-card">
+        <i class="fas fa-bolt"></i>
+        <h3>Dynamic Routing</h3>
+        <p>Our system intelligently calculates the fastest and safest path for emergency vehicles in real-time using
+          live traffic data and smart algorithms.</p>
+      </div>
+
+      <div class="about-card">
+        <i class="fas fa-satellite-dish"></i>
+        <h3>Real-Time Communication</h3>
+        <p>Enables live coordination between hospitals, fire stations, and police control rooms for quick response and
+          route clearance.</p>
+      </div>
+
+      <div class="about-card">
+        <i class="fas fa-heartbeat"></i>
+        <h3>Emergency Response</h3>
+        <p>Integrated SOS system that sends alerts and location details to nearby emergency services instantly.</p>
+      </div>
+
+      <div class="about-card center-card">
+        <i class="fas fa-brain"></i>
+        <h3>AI & ML Integration</h3>
+        <p>Smart algorithms analyze traffic and predict safest, fastest emergency routes in real time.</p>
+      </div>
+
     </div>
 
-    <div class="input-group">
-      <i class="fas fa-location-dot"></i>
-      <input type="text" id="destination" placeholder="Enter Destination">
+    <div class="about-footer">
+      <h3>Our Mission</h3>
+      <p>To revolutionize emergency response systems by bridging technology, speed, and human safety — ensuring help
+        reaches faster when every second counts.</p>
     </div>
+  </section>
 
-    <div class="input-group">
-      <i class="fas fa-car"></i>
-      <select id="vehicle">
-        <option value="ambulance">🚑 Ambulance</option>
-        <option value="firetruck">🚒 Fire Truck</option>
-        <option value="police">🚓 Police Vehicle</option>
-      </select>
-    </div>
 
-    <button class="btn" onclick="showMessage()"><i class="fas fa-route"></i> Find Fastest Route</button>
-  </div>
-
-  <!-- Popup Modal -->
+  <!-- Popup modal -->
   <div id="popup" class="popup">
     <div class="popup-content">
       <span class="close" onclick="closePopup()">&times;</span>
       <p id="popup-text"></p>
+      <div style="margin-top:12px;">
+        <button class="btn" onclick="closePopup()">OK</button>
+      </div>
     </div>
   </div>
 
-  <!-- Map -->
-  <div id="map"></div>
+  <footer>&copy; 2025 Dynamic Emergency Vehicle Route Planner</footer>
 
-  <!-- Footer -->
-  <footer>
-    &copy; 2025 Emergency Planner | Powered by AI & GPS Data
-  </footer>
-
-  <!-- JS -->
   <script src="script.js"></script>
+  <!-- Google Maps script: optional (needed if you want map + directions client-side).
+       You can keep it empty here because backend will proxy Directions if preferred.
+       If you want client-side map features, add your key here:
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=YOUR_KEY&callback=initMap"></script>
+  -->
+  <!-- <script src="script.js"></script> -->
 
   <!-- Google Maps API -->
   <script async defer
