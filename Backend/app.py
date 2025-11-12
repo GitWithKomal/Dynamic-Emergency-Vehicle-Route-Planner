@@ -1,49 +1,143 @@
 from flask import Flask, request, jsonify
-import googlemaps
-import os
+from flask_cors import CORS
+import requests
 
 app = Flask(__name__)
+CORS(app)
 
-# Use your Google Maps API key
-API_KEY = "AIzaSyAX2h2t5DSv4TwXmpMbUZEdMklqWK6EaGs"
-gmaps = googlemaps.Client(key=API_KEY)
+# -------------------------------
+# ✅ FREE GEOCODER (NOMINATIM)
+# -------------------------------
+def geocode_location(query):
+    # If lat,lng directly provided
+    if "," in query:
+        parts = query.split(",")
+        if len(parts) >= 2:
+            try:
+                lat = float(parts[0].strip())
+                lng = float(parts[1].strip())
+                return lat, lng
+            except:
+                return None
 
-@app.route('/')
-def home():
-    return "Emergency Route Finder Backend is Running 🚑"
+    # Otherwise → Nominatim search
+    url = f"https://nominatim.openstreetmap.org/search?q={query}&format=json"
+    try:
+        res = requests.get(url, headers={"User-Agent": "EmergencyRouteApp"})
+        data = res.json()
 
-@app.route('/route', methods=['POST'])
-def get_route():
+        if not data:
+            return None
+
+        return float(data[0]["lat"]), float(data[0]["lon"])
+    except:
+        return None
+
+
+# -------------------------------
+# ✅ FREE OSRM ROUTING
+# -------------------------------
+def get_osrm_route(lat1, lng1, lat2, lng2):
+    url = (
+        f"http://router.project-osrm.org/route/v1/driving/"
+        f"{lng1},{lat1};{lng2},{lat2}?overview=full&geometries=geojson"
+    )
+
+    try:
+        res = requests.get(url)
+        data = res.json()
+
+        if "routes" not in data or len(data["routes"]) == 0:
+            return None
+
+        route = data["routes"][0]
+
+        return {
+            "distance": round(route["distance"] / 1000, 2),
+            "duration": round(route["duration"] / 60, 1),
+            "geometry": route["geometry"]
+        }
+    except:
+        return None
+
+
+# -------------------------------
+# ✅ MAIN ROUTE API (SAFE + DEBUG)
+# -------------------------------
+@app.route("/api/route", methods=["POST"])
+def route_api():
+    try:
+        data = request.get_json()
+
+        start = data.get("start")
+        destination = data.get("destination")
+
+        print("\n===== ROUTE REQUEST RECEIVED =====")
+        print("Start input:", start)
+        print("Destination input:", destination)
+        print("==================================\n")
+
+        if not start or not destination:
+            return jsonify({"error": "Missing start or destination"}), 400
+
+        # ✅ Geocode start + destination
+        s_loc = geocode_location(start)
+        d_loc = geocode_location(destination)
+
+        print("Geocode START:", s_loc)
+        print("Geocode DEST:", d_loc)
+
+        if s_loc is None:
+            return jsonify({"error": "Invalid START location"}), 400
+        if d_loc is None:
+            return jsonify({"error": "Invalid DESTINATION location"}), 400
+
+        s_lat, s_lng = s_loc
+        d_lat, d_lng = d_loc
+
+        # ✅ Get OSRM route
+        route = get_osrm_route(s_lat, s_lng, d_lat, d_lng)
+
+        print("Route data:", route)
+
+        if route is None:
+            return jsonify({"error": "No route found"}), 404
+
+        return jsonify({
+            "start": start,
+            "destination": destination,
+            "distance_km": route["distance"],
+            "duration_min": route["duration"],
+            "polyline": route["geometry"]
+        })
+
+    except Exception as e:
+        print("\n🔥 BACKEND CRASHED:", str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+# -------------------------------
+# ✅ SOS API
+# -------------------------------
+@app.route("/api/sos", methods=["POST"])
+def sos_api():
     data = request.get_json()
+    location = data.get("location")
 
-    start = data.get('start')
-    destination = data.get('destination')
-    vehicle = data.get('vehicle', 'ambulance')
+    if not location:
+        return jsonify({"error": "Location missing"}), 400
 
-    if not start or not destination:
-        return jsonify({'error': 'Missing start or destination'}), 400
+    print("\n🚨 SOS RECEIVED 🚨")
+    print("Location:", location)
+    print("================================\n")
 
-    # Request route from Google Maps
-    directions = gmaps.directions(start, destination, mode="driving")
+    return jsonify({"success": True, "message": "SOS sent!"})
 
-    if not directions:
-        return jsonify({'error': 'No route found'}), 404
 
-    leg = directions[0]['legs'][0]
-    distance = leg['distance']['text']
-    duration = leg['duration']['text']
+@app.route("/")
+def home():
+    return jsonify({"message": "Backend running on port 5000"})
 
-    # Simple AI-like adjustment (you can improve this later)
-    ai_duration = f"{int(leg['duration']['value'] / 60 * 0.9)} mins"  # 10% faster
 
-    return jsonify({
-        'start': start,
-        'destination': destination,
-        'vehicle': vehicle,
-        'distance': distance,
-        'duration': duration,
-        'ai_predicted_duration': ai_duration
-    })
-
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run(debug=True, host="127.0.0.1", port=5000)
