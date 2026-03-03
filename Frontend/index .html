@@ -7,7 +7,9 @@
 
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- ✅ MAPPLS MAP SDK (replaces Leaflet) -->
+  <script src="https://apis.mappls.com/advancedmaps/api/e4c70b528058ef82f6c4b85b546c30b1/map_sdk?layer=vector&v=3.0&callback=initMap" defer></script>
 
   <style>
     #map { width: 100%; height: 450px; border-radius: 10px; }
@@ -52,7 +54,6 @@
         <button class="btn danger" onclick="sendSOS()"><i class="fas fa-bell"></i> SOS</button>
       </div>
 
-      <!-- ▶️ START BUTTON -->
       <div class="control-row">
         <button class="btn" id="startTrackingBtn" onclick="startTracking()"><i class="fa-solid fa-play"></i> Start Tracking</button>
       </div>
@@ -90,7 +91,6 @@
 
   <footer>&copy; 2025 Dynamic Emergency Vehicle Route Planner</footer>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
