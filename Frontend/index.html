@@ -7,13 +7,21 @@
 
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <script src="https://apis.mappls.com/advancedmaps/api/e4c70b528058ef82f6c4b85b546c30b1/map_sdk?layer=vector&v=3.0&callback=initMap" defer></script>
 
   <style>
     #map { width: 100%; height: 450px; border-radius: 10px; }
   </style>
 </head>
 <body>
+  <!-- Theme Toggle Button -->
+  <div class="theme-toggle">
+    <button id="themeToggle" onclick="toggleTheme()">
+      <i class="fas fa-moon"></i>
+    </button>
+  </div>
+
   <header>🚨 Dynamic Emergency Vehicle Route Planner</header>
 
   <nav class="navbar">
@@ -48,13 +56,49 @@
       </div>
 
       <div class="control-row">
-        <button class="btn" onclick="findRoute()"><i class="fas fa-route"></i> Find Fastest Route</button>
-        <button class="btn danger" onclick="sendSOS()"><i class="fas fa-bell"></i> SOS</button>
+        <button class="btn" id="findRouteBtn" onclick="findRoute()">
+          <i class="fas fa-route"></i> Find Fastest Route
+        </button>
+        <button class="btn danger" id="sosBtn" onclick="sendSOS()">
+          <i class="fas fa-bell"></i> SOS
+        </button>
       </div>
 
-      <!-- ▶️ START BUTTON -->
       <div class="control-row">
-        <button class="btn" id="startTrackingBtn" onclick="startTracking()"><i class="fa-solid fa-play"></i> Start Tracking</button>
+        <button class="btn" id="startTrackingBtn" onclick="toggleTracking()">
+          <i class="fa-solid fa-play"></i> Start Tracking
+        </button>
+      </div>
+
+      <!-- Route Info Display -->
+      <div class="route-info" id="routeInfo" style="display:none;">
+        <div class="route-stat">
+          <i class="fas fa-road"></i>
+          <div>
+            <span class="label">Distance</span>
+            <span class="value" id="routeDistance">--</span>
+          </div>
+        </div>
+        <div class="route-stat">
+          <i class="fas fa-clock"></i>
+          <div>
+            <span class="label">Duration</span>
+            <span class="value" id="routeTime">--</span>
+          </div>
+        </div>
+        <div class="route-stat">
+          <i class="fas fa-car"></i>
+          <div>
+            <span class="label">Vehicle</span>
+            <span class="value" id="vehicleType">--</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tracking Badge -->
+      <div class="tracking-badge" id="trackingBadge" style="display:none;">
+        <div class="tracking-dot"></div>
+        <span id="trackingStatus">🔴 Tracking Active</span>
       </div>
     </div>
   </main>
@@ -80,6 +124,22 @@
     </div>
   </section>
 
+  <!-- Modern Toast Notification Container -->
+  <div id="notificationContainer" class="notification-container"></div>
+
+  <!-- Modern Modal Popup -->
+  <div id="modernPopup" class="modern-popup">
+    <div class="modern-popup-content">
+      <button class="popup-close" onclick="closeModernPopup()">✕</button>
+      <div class="popup-icon" id="popupIcon"></div>
+      <h2 id="popupTitle"></h2>
+      <p id="popupMessage"></p>
+      <div class="popup-details" id="popupDetails"></div>
+      <button class="popup-btn" onclick="closeModernPopup()">OK</button>
+    </div>
+  </div>
+
+  <!-- Old Popup (Backup) -->
   <div id="popup" class="popup">
     <div class="popup-content">
       <span class="close" onclick="closePopup()">&times;</span>
@@ -90,7 +150,7 @@
 
   <footer>&copy; 2025 Dynamic Emergency Vehicle Route Planner</footer>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="script.js"></script>
+  <script src="theme.js"></script>
 </body>
 </html>
