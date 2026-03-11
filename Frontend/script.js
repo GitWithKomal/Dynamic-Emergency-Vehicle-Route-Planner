@@ -761,4 +761,3 @@ function showPopup(txt) {
 function closePopup() {
   document.getElementById("popup").style.display = "none";
 }
-
