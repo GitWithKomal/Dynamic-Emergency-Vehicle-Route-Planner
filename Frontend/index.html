@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -11,12 +12,19 @@
 
   <!-- ✅ MAPPLS MAP SDK (replaces Leaflet) -->
 
-  <script src="https://apis.mappls.com/advancedmaps/api/e4c70b528058ef82f6c4b85b546c30b1/map_sdk?layer=vector&v=3.0&callback=initMap" defer></script>
+  <script
+    src="https://apis.mappls.com/advancedmaps/api/e4c70b528058ef82f6c4b85b546c30b1/map_sdk?layer=vector&v=3.0&callback=initMap"
+    defer></script>
 
   <style>
-    #map { width: 100%; height: 450px; border-radius: 10px; }
+    #map {
+      width: 100%;
+      height: 450px;
+      border-radius: 10px;
+    }
   </style>
 </head>
+
 <body>
   <!-- Theme Toggle Button -->
   <div class="theme-toggle">
@@ -106,7 +114,9 @@
     </div>
   </main>
 
-  <section id="mapview"><div id="map"></div></section>
+  <section id="mapview">
+    <div id="map"></div>
+  </section>
 
   <section id="contacts" class="info-section">
     <h2>🚨 Emergency Contacts</h2>
@@ -116,10 +126,22 @@
   <section id="about" class="info-section about-section">
     <h2>💡 About </h2>
     <div class="about-content">
-      <div class="about-card"><i class="fas fa-bolt"></i><h3>Dynamic Routing</h3><p>Fastest route based on real-time traffic and smart algorithms.</p></div>
-      <div class="about-card"><i class="fas fa-satellite-dish"></i><h3>Real-Time Communication</h3><p>Coordinates with emergency services instantly.</p></div>
-      <div class="about-card"><i class="fa-solid fa-car-on"></i><h3>Vehicle Tracking</h3><p>Live car tracking with accurate GPS updates.</p></div>
-      <div class="about-card center-card"><i class="fas fa-brain"></i><h3>AI & ML Integration</h3><p>Predicts safest and fastest emergency routes.</p></div>
+      <div class="about-card"><i class="fas fa-bolt"></i>
+        <h3>Dynamic Routing</h3>
+        <p>Fastest route based on real-time traffic and smart algorithms.</p>
+      </div>
+      <div class="about-card"><i class="fas fa-satellite-dish"></i>
+        <h3>Real-Time Communication</h3>
+        <p>Coordinates with emergency services instantly.</p>
+      </div>
+      <div class="about-card"><i class="fa-solid fa-car-on"></i>
+        <h3>Vehicle Tracking</h3>
+        <p>Live car tracking with accurate GPS updates.</p>
+      </div>
+      <div class="about-card center-card"><i class="fas fa-brain"></i>
+        <h3>AI & ML Integration</h3>
+        <p>Predicts safest and fastest emergency routes.</p>
+      </div>
     </div>
     <div class="about-footer">
       <h3>Our Mission</h3>
@@ -156,4 +178,5 @@
   <script src="script.js"></script>
   <script src="theme.js"></script>
 </body>
+
 </html>
