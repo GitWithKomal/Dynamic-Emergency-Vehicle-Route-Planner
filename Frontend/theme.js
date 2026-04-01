@@ -6,6 +6,7 @@ if (currentTheme === 'light') {
   updateThemeIcon();
 }
 
+// Toggle theme function
 function toggleTheme() {
   const body = document.body;
   const themeToggle = document.getElementById('themeToggle');
