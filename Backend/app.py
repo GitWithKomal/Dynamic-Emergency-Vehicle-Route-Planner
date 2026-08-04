@@ -60,10 +60,6 @@ def get_osrm_route(lat1, lng1, lat2, lng2):
     except:
         return None
 
-
-# -------------------------------
-# ✅ MAIN ROUTE API (SAFE + DEBUG)
-# -------------------------------
 @app.route("/api/route", methods=["POST"])
 def route_api():
     try:

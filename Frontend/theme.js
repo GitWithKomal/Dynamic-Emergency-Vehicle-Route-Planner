@@ -1,39 +1,43 @@
-// Initialize theme from localStorage
-const currentTheme = localStorage.getItem('theme') || 'dark';
-document.documentElement.setAttribute('data-theme', currentTheme);
-if (currentTheme === 'light') {
-  document.body.classList.add('light-mode');
-  updateThemeIcon();
-}
+/* ============================================================
+   DEVRP — theme.js
+   Handles dark/light mode toggle with localStorage persistence
+   ============================================================ */
 
-// Toggle theme function
-function toggleTheme() {
-  const body = document.body;
-  const themeToggle = document.getElementById('themeToggle');
-  
-  if (body.classList.contains('light-mode')) {
-    // Switch to dark mode
-    body.classList.remove('light-mode');
-    localStorage.setItem('theme', 'dark');
-    document.documentElement.setAttribute('data-theme', 'dark');
+// Initialize theme on page load
+const savedTheme = localStorage.getItem("devrp-theme") || "dark";
+applyTheme(savedTheme);
+
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.body.classList.add("light-mode");
+    document.documentElement.setAttribute("data-theme", "light");
   } else {
-    // Switch to light mode
-    body.classList.add('light-mode');
-    localStorage.setItem('theme', 'light');
-    document.documentElement.setAttribute('data-theme', 'light');
+    document.body.classList.remove("light-mode");
+    document.documentElement.setAttribute("data-theme", "dark");
   }
-  
   updateThemeIcon();
 }
 
-// Update theme icon
+function toggleTheme() {
+  const isLight = document.body.classList.contains("light-mode");
+  const next    = isLight ? "dark" : "light";
+
+  localStorage.setItem("devrp-theme", next);
+
+  // Animate button
+  const btn = document.getElementById("themeToggle");
+  btn.style.transform = "rotate(360deg) scale(1.15)";
+  setTimeout(() => { btn.style.transform = ""; }, 400);
+
+  applyTheme(next);
+}
+
 function updateThemeIcon() {
-  const themeToggle = document.getElementById('themeToggle');
-  const body = document.body;
-  
-  if (body.classList.contains('light-mode')) {
-    themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
-  } else {
-    themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
+  const btn     = document.getElementById("themeToggle");
+  const isLight = document.body.classList.contains("light-mode");
+  if (btn) {
+    btn.innerHTML = isLight
+      ? '<i class="fas fa-sun"></i>'
+      : '<i class="fas fa-moon"></i>';
   }
 }

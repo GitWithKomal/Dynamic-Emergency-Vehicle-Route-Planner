@@ -1,763 +1,659 @@
-const API_BASE = "http://127.0.0.1:5000";
 
-// ✅ Nagpur coordinates
+const API_BASE   = "http://127.0.0.1:5000";
 const NAGPUR_LAT = 21.1458;
 const NAGPUR_LNG = 79.0882;
+const MAPPLS_KEY = "e4c70b528058ef82f6c4b85b546c30b1";
 
-let map = null;
-let routeLayer = null;
-let carMarker = null;
+let map               = null;
+let routeLayer        = null;
+let carMarker         = null;
 let destinationMarker = null;
-let routeCoords = [];
-let watchId = null;
-let isFollowing = true;
-let isTracking = false;
-let sosActive = false;
+let routeCoords       = [];
+let watchId           = null;
+let isFollowing       = true;
+let isTracking        = false;
+let sosActive         = false;
+let sosAlarmSound     = null;
+let audioContext      = null;
+let sheetExpanded     = false;
+let suggestDebounceTimer = null;
+let activeSuggestField   = null;
 
-// ==========================================
-// TRAFFIC CONGESTION DATA & MONITORING
-// ==========================================
 
-const congestionLevels = {
-  low: { color: '#4caf50', message: '✅ Road is clear', icon: '🟢' },
-  medium: { color: '#ffc107', message: '⚠️ Moderate traffic', icon: '🟡' },
-  high: { color: '#ff9800', message: '🚨 Heavy traffic', icon: '🔴' },
-  severe: { color: '#f44336', message: '🛑 Severe congestion', icon: '⛔' }
-};
+let _mapplsToken = null;
+let _tokenExpiry = 0;
 
-// Mock traffic data on route
-const trafficSpots = [
-  { lat: 21.15, lng: 79.08, level: 'medium', description: 'Traffic light congestion' },
-  { lat: 21.16, lng: 79.09, level: 'high', description: 'Heavy vehicle movement' },
-  { lat: 21.14, lng: 79.10, level: 'low', description: 'Clear road ahead' }
-];
-
-// Check traffic on calculated route
-function checkTrafficOnRoute() {
-  if (routeCoords.length === 0) return;
-
-  let trafficWarnings = [];
-
-  routeCoords.forEach((coord, index) => {
-    const [lng, lat] = coord;
-    
-    trafficSpots.forEach(spot => {
-      const distance = Math.sqrt(Math.pow(lat - spot.lat, 2) + Math.pow(lng - spot.lng, 2));
-      
-      // If traffic spot is within 0.02 degrees (~2km)
-      if (distance < 0.02) {
-        trafficWarnings.push({
-          level: spot.level,
-          description: spot.description,
-          percentage: Math.round(((index + 1) / routeCoords.length) * 100)
-        });
-      }
-    });
-  });
-
-  if (trafficWarnings.length > 0) {
-    const worstTraffic = trafficWarnings.reduce((prev, current) => {
-      const levels = { low: 1, medium: 2, high: 3, severe: 4 };
-      return levels[current.level] > levels[prev.level] ? current : prev;
-    });
-
-    displayTrafficWarning(worstTraffic, trafficWarnings);
-  }
+async function getMapplsToken() {
+  if (_mapplsToken && Date.now() < _tokenExpiry) return _mapplsToken;
+  try {
+    const res  = await fetch(
+      `https://outpost.mappls.com/api/security/oauth/token?grant_type=client_credentials&client_id=${MAPPLS_KEY}&client_secret=${MAPPLS_KEY}`
+    );
+    const data = await res.json();
+    _mapplsToken = data.access_token;
+    _tokenExpiry  = Date.now() + (data.expires_in - 60) * 1000;
+    return _mapplsToken;
+  } catch { return MAPPLS_KEY; }
 }
 
-function displayTrafficWarning(worstTraffic, allWarnings) {
-  const trafficData = congestionLevels[worstTraffic.level];
-  
-  showModernPopup({
-    icon: trafficData.icon,
-    title: '🚦 Traffic Alert',
-    message: trafficData.message,
-    details: {
-      '📍 Location': worstTraffic.description,
-      '📊 Route Progress': worstTraffic.percentage + '%',
-      '⚠️ Total Warnings': allWarnings.length,
-      '💡 Recommendation': worstTraffic.level === 'severe' ? 'Consider alternate route or delay journey' : 'Continue with caution'
-    }
-  });
 
-  showToast('warning', '🚦 Traffic Detected', trafficData.message);
-
-  // Highlight congested area on map if available
-  highlightTrafficArea(worstTraffic);
-}
-
-function highlightTrafficArea(traffic) {
-  const trafficData = congestionLevels[traffic.level];
-  
-  // Visual feedback on map (if needed)
-  const trafficMarker = new mappls.Marker({
-    map: map,
-    position: { lat: trafficSpots[0].lat, lng: trafficSpots[0].lng },
-    html: `<div style="
-      width: 20px;
-      height: 20px;
-      background: ${trafficData.color};
-      border-radius: 50%;
-      border: 3px solid white;
-      box-shadow: 0 0 10px ${trafficData.color};
-      animation: trafficPulse 1s infinite;
-    "></div>`,
-    width: 20,
-    height: 20
-  });
-}
-
-// ✅ Mappls map initializes via SDK callback
 function initMap() {
   map = new mappls.Map("map", {
     center: { lat: NAGPUR_LAT, lng: NAGPUR_LNG },
-    zoom: 13,
-    search: false
+    zoom: 13, search: false
   });
 
   let lockCount = 0;
   const lockInterval = setInterval(() => {
-    if (lockCount < 10) {
-      map.setCenter({ lat: NAGPUR_LAT, lng: NAGPUR_LNG });
-      map.setZoom(13);
-      lockCount++;
-    } else {
-      clearInterval(lockInterval);
-    }
+    if (lockCount < 10) { map.setCenter({ lat: NAGPUR_LAT, lng: NAGPUR_LNG }); map.setZoom(13); lockCount++; }
+    else clearInterval(lockInterval);
   }, 300);
 
-  map.on("load", function () {
+  map.on("load", () => {
     clearInterval(lockInterval);
     map.setCenter({ lat: NAGPUR_LAT, lng: NAGPUR_LNG });
     map.setZoom(13);
     addRecenterButton();
+    updateMapStatus("READY", "success");
   });
 
-  map.on("dragstart", function () {
-    isFollowing = false;
+  map.on("dragstart", () => { isFollowing = false; });
+
+  map.on("zoom", () => {
+    const z = map.getZoom ? Math.round(map.getZoom()) : 13;
+    const el = document.getElementById("mapZoomDisplay");
+    if (el) el.innerHTML = `<i class="fas fa-search-plus"></i> ZOOM: ${z}`;
   });
 }
 
-// ✅ Recenter button
+function updateMapStatus(text, state) {
+  const badge = document.getElementById("mapLiveBadge");
+  if (!badge) return;
+  const colors = { success:"#00e676", active:"#00e5ff", warning:"#ff9100", danger:"#ff1744" };
+  badge.textContent = `⬤ ${text}`;
+  badge.style.color = colors[state] || colors.success;
+}
+
 function addRecenterButton() {
+  const existing = document.getElementById("recenterBtn");
+  if (existing) existing.remove();
   const btn = document.createElement("button");
   btn.id = "recenterBtn";
-  btn.innerHTML = "📍";
-  btn.title = "Recenter to my location";
-  btn.style.cssText = `
-    position: absolute;
-    bottom: 120px;
-    right: 12px;
-    z-index: 999;
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: #ffffff;
-    border: none;
-    font-size: 20px;
-    cursor: pointer;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s;
-  `;
+  btn.innerHTML = `<i class="fas fa-crosshairs"></i>`;
+  btn.title = "Recenter";
+  btn.style.cssText = `position:absolute;bottom:90px;right:12px;z-index:999;width:40px;height:40px;
+    border-radius:50%;background:rgba(7,14,26,0.88);border:1px solid rgba(0,229,255,0.3);
+    color:#00e5ff;font-size:15px;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,0.4);
+    display:flex;align-items:center;justify-content:center;transition:all 0.2s;backdrop-filter:blur(8px);`;
   btn.onmouseover = () => btn.style.transform = "scale(1.1)";
-  btn.onmouseout = () => btn.style.transform = "scale(1)";
-  btn.onclick = function () {
+  btn.onmouseout  = () => btn.style.transform = "scale(1)";
+  btn.onclick = () => {
     isFollowing = true;
-    if (carMarker) {
-      const pos = carMarker.getPosition();
-      if (pos) {
-        map.setCenter({ lat: pos.lat, lng: pos.lng });
-        map.setZoom(15);
-      }
-    }
+    if (carMarker) { const pos = carMarker.getPosition(); if (pos) { map.setCenter({lat:pos.lat,lng:pos.lng}); map.setZoom(15); } }
+    else { map.setCenter({lat:NAGPUR_LAT,lng:NAGPUR_LNG}); map.setZoom(13); }
   };
   document.getElementById("map").appendChild(btn);
 }
 
-// ==========================================
-// BEAUTIFUL POP-UP SYSTEM
-// ==========================================
 
-function showModernPopup(config) {
-  const popup = document.getElementById("modernPopup");
-  
-  document.getElementById("popupIcon").textContent = config.icon || "✅";
-  document.getElementById("popupTitle").textContent = config.title || "Success";
-  document.getElementById("popupMessage").textContent = config.message || "";
-  
-  const detailsDiv = document.getElementById("popupDetails");
-  if (config.details && Object.keys(config.details).length > 0) {
-    detailsDiv.innerHTML = Object.entries(config.details)
-      .map(([key, value]) => `
-        <div>
-          <span class="label">${key}</span>
-          <span class="value">${value}</span>
-        </div>
-      `).join("");
-    detailsDiv.style.display = "block";
-  } else {
-    detailsDiv.style.display = "none";
-  }
-  
-  popup.style.display = "flex";
+function updateClock() {
+  const el = document.getElementById("liveClock");
+  if (el) el.textContent = new Date().toLocaleTimeString("en-IN", {hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit"});
+}
+setInterval(updateClock, 1000);
+
+
+function selectVehicle(type, el) {
+  document.querySelectorAll(".vehicle-card").forEach(c => c.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById("vehicle").value = type;
 }
 
-function closeModernPopup() {
-  document.getElementById("modernPopup").style.display = "none";
-}
 
-// Toast Notification
-function showToast(type, title, message = "") {
-  const container = document.getElementById("notificationContainer");
-  const toast = document.createElement("div");
-  toast.className = `toast ${type}`;
-  
-  const icons = {
-    success: "✅",
-    error: "❌",
-    warning: "⚠️",
-    info: "ℹ️"
-  };
-  
-  toast.innerHTML = `
-    <div class="toast-icon">${icons[type] || icons.info}</div>
-    <div class="toast-content">
-      <div class="toast-title">${title}</div>
-      ${message ? `<div class="toast-message">${message}</div>` : ""}
-    </div>
-  `;
-  
-  container.appendChild(toast);
-  
-  setTimeout(() => {
-    toast.classList.add("removing");
-    setTimeout(() => toast.remove(), 400);
-  }, 3000);
-}
-
-// ✅ GPS location button
 function getLocation() {
-  const btn = event.target;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-  
+  const btn = event.currentTarget;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; btn.disabled = true;
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
-      document.getElementById("start").value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      map.setCenter({ lat: lat, lng: lng });
-      map.setZoom(15);
-      
-      if (carMarker) {
-        carMarker.remove();
-        carMarker = null;
-      }
-      
-      carMarker = new mappls.Marker({
-        map: map,
-        position: { lat: lat, lng: lng },
-        html: '<div style="width:28px;height:28px;background:#1a73e8;border-radius:50%;border:3px solid white;box-shadow:0 0 8px rgba(26,115,232,0.6);display:flex;align-items:center;justify-content:center;"><i class="fas fa-location-arrow" style="color:white;font-size:14px;"></i></div>',
-        width: 28,
-        height: 28
-      });
-      
-      btn.innerHTML = '📍';
-      
-      showToast("success", "📍 Location Found!", `Accuracy: ${accuracy.toFixed(0)}m`);
+      const { latitude:lat, longitude:lng, accuracy } = pos.coords;
+      document.getElementById("start").value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      map.setCenter({lat,lng}); map.setZoom(15);
+      if (carMarker) { carMarker.remove(); carMarker = null; }
+      carMarker = new mappls.Marker({map, position:{lat,lng}, html:markerHTML("origin"), width:30, height:30});
+      btn.innerHTML = '<i class="fas fa-crosshairs"></i>'; btn.disabled = false;
+      showToast("success","📍 Location Found",`Accuracy: ±${accuracy.toFixed(0)}m`);
+      updateMapStatus("GPS LOCKED","active");
     },
-    (err) => {
-      btn.innerHTML = '📍';
-      showToast("error", "❌ GPS Error", "Enable location permission");
-    }
+    () => { btn.innerHTML='<i class="fas fa-crosshairs"></i>'; btn.disabled=false; showToast("error","GPS Error","Enable location permission"); },
+    {enableHighAccuracy:true, timeout:10000}
   );
 }
 
-// ✅ Remove route safely
-function removeRoute() {
-  if (routeLayer) {
-    try { routeLayer.setMap(null); } catch(e) {
-      try { routeLayer.remove(); } catch(e2) {}
-    }
-    routeLayer = null;
-  }
+
+function markerHTML(type) {
+  if (type === "origin") return `<div style="width:30px;height:30px;background:#0077b6;border-radius:50%;border:3px solid white;box-shadow:0 0 12px rgba(0,229,255,0.6);display:flex;align-items:center;justify-content:center;"><i class="fas fa-location-arrow" style="color:white;font-size:12px;"></i></div>`;
+  return `<div style="text-align:center;"><i class="fas fa-map-marker-alt" style="color:#ff1744;font-size:34px;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));"></i></div>`;
 }
 
-// ✅ Find fastest route with traffic check
+
+async function handleAutosuggest(fieldId) {
+  const input = document.getElementById(fieldId);
+  const list  = document.getElementById(`${fieldId}-suggestions`);
+  if (!input || !list) return;
+  const query = input.value.trim();
+  clearTimeout(suggestDebounceTimer);
+  if (query.length < 2) { list.classList.remove("active"); list.innerHTML = ""; return; }
+
+  suggestDebounceTimer = setTimeout(async () => {
+    try {
+      const token = await getMapplsToken();
+      const res   = await fetch(`https://atlas.mappls.com/api/places/search/json?query=${encodeURIComponent(query+" Nagpur")}&region=IND&tokenizeAddress=true`,
+        {headers:{Authorization:`Bearer ${token}`}});
+      const data  = await res.json();
+      const results = data.suggestedLocations || [];
+
+      if (!results.length) {
+        list.innerHTML = `<li onclick="selectSuggestion('${fieldId}','${query}, Nagpur',0,0)"><span class="suggest-icon">🔍</span><span class="suggest-text"><span class="suggest-main">${query}, Nagpur</span><span class="suggest-sub">Search this location</span></span></li>`;
+        list.classList.add("active"); return;
+      }
+
+      list.innerHTML = results.slice(0,7).map((r,i) => {
+        const name = (r.placeName||"Unknown").replace(/[`"<>]/g,"'");
+        const addr = (r.placeAddress||"").replace(/[`"<>]/g,"'");
+        const lat  = r.latitude||0; const lng = r.longitude||0;
+        return `<li onclick="selectSuggestion('${fieldId}','${name}',${lat},${lng})" onmouseover="highlightSuggestion('${fieldId}',${i})"><span class="suggest-icon">📍</span><span class="suggest-text"><span class="suggest-main">${name}</span><span class="suggest-sub">${addr}</span></span></li>`;
+      }).join("");
+      list.classList.add("active"); activeSuggestField = fieldId;
+    } catch(err) {
+      list.innerHTML = `<li onclick="selectSuggestion('${fieldId}','${query}, Nagpur',0,0)"><span class="suggest-icon">🔍</span><span class="suggest-text"><span class="suggest-main">${query}, Nagpur</span><span class="suggest-sub">Search this location</span></span></li>`;
+      list.classList.add("active");
+    }
+  }, 280);
+}
+
+function selectSuggestion(fieldId, name, lat, lng) {
+  const input = document.getElementById(fieldId);
+  const list  = document.getElementById(`${fieldId}-suggestions`);
+  if (input) input.value = name;
+  if (list)  list.classList.remove("active");
+  activeSuggestField = null;
+  if (map && lat && lng) { map.setCenter({lat:parseFloat(lat),lng:parseFloat(lng)}); map.setZoom(15); }
+}
+
+function highlightSuggestion(fieldId, index) {
+  document.querySelectorAll(`#${fieldId}-suggestions li`).forEach((li,i) => li.classList.toggle("highlighted", i===index));
+}
+
+function handleSuggestKey(e, fieldId) {
+  const list  = document.getElementById(`${fieldId}-suggestions`);
+  const items = list?.querySelectorAll("li");
+  if (!items||!items.length) return;
+  const current = [...items].findIndex(li => li.classList.contains("highlighted"));
+  if (e.key==="ArrowDown")  { e.preventDefault(); const next=current<items.length-1?current+1:0; items.forEach((li,i)=>li.classList.toggle("highlighted",i===next)); items[next].scrollIntoView({block:"nearest"}); }
+  else if (e.key==="ArrowUp")   { e.preventDefault(); const prev=current>0?current-1:items.length-1; items.forEach((li,i)=>li.classList.toggle("highlighted",i===prev)); items[prev].scrollIntoView({block:"nearest"}); }
+  else if (e.key==="Enter"&&current!==-1) { e.preventDefault(); items[current].click(); }
+  else if (e.key==="Escape") { list.classList.remove("active"); activeSuggestField=null; }
+}
+
+document.addEventListener("click", (e) => {
+  ["start","destination","sheet-start","sheet-destination"].forEach(id => {
+    const wrapper = document.getElementById(id)?.closest(".autocomplete-wrapper");
+    const list    = document.getElementById(`${id}-suggestions`);
+    if (list&&wrapper&&!wrapper.contains(e.target)) list.classList.remove("active");
+  });
+});
+
+
+async function handleAutosuggestSheet(sheetInputId, mainInputId) {
+  const sheetVal = document.getElementById(sheetInputId)?.value||"";
+  const mi = document.getElementById(mainInputId);
+  if (mi) mi.value = sheetVal;
+  if (mainInputId==="start") { const p=document.getElementById("peekStart"); if(p){p.textContent=sheetVal||"Where from?";p.classList.toggle("has-value",!!sheetVal);} }
+  else { const p=document.getElementById("peekDest"); if(p){p.textContent=sheetVal||"Where to?";p.classList.toggle("has-value",!!sheetVal);} }
+  await handleAutosuggest(sheetInputId);
+}
+
+function selectSuggestionSheet(fieldId, name, lat, lng) {
+  selectSuggestion(fieldId, name, lat, lng);
+  if (fieldId==="sheet-start") { const m=document.getElementById("start"); if(m)m.value=name; const p=document.getElementById("peekStart"); if(p){p.textContent=name;p.classList.add("has-value");} }
+  else { const m=document.getElementById("destination"); if(m)m.value=name; const p=document.getElementById("peekDest"); if(p){p.textContent=name;p.classList.add("has-value");} }
+}
+
+function getLocationSheet() {
+  const btn = event.currentTarget;
+  btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; btn.disabled=true;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const {latitude:lat,longitude:lng,accuracy}=pos.coords;
+      const val=`${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      const si=document.getElementById("sheet-start"); const mi=document.getElementById("start");
+      if(si)si.value=val; if(mi)mi.value=val;
+      const peek=document.getElementById("peekStart"); if(peek){peek.textContent=val;peek.classList.add("has-value");}
+      map.setCenter({lat,lng}); map.setZoom(15);
+      if(carMarker){carMarker.remove();carMarker=null;}
+      carMarker=new mappls.Marker({map,position:{lat,lng},html:markerHTML("origin"),width:30,height:30});
+      btn.innerHTML='<i class="fas fa-crosshairs"></i>'; btn.disabled=false;
+      showToast("success","📍 Location Found",`Accuracy: ±${accuracy.toFixed(0)}m`);
+    },
+    () => { btn.innerHTML='<i class="fas fa-crosshairs"></i>'; btn.disabled=false; showToast("error","GPS Error","Enable location permission"); },
+    {enableHighAccuracy:true, timeout:10000}
+  );
+}
+
+function findRouteFromSheet() {
+  const ss=document.getElementById("sheet-start")?.value.trim();
+  const sd=document.getElementById("sheet-destination")?.value.trim();
+  if(ss) document.getElementById("start").value=ss;
+  if(sd) document.getElementById("destination").value=sd;
+  collapseSheet();
+  findRoute();
+}
+
+function updateSheetRouteInfo(distance, duration, vehicle) {
+  const info=document.getElementById("sheetRouteInfo"); if(!info)return;
+  document.getElementById("sheetDistance").textContent=distance;
+  document.getElementById("sheetTime").textContent=duration;
+  document.getElementById("sheetVehicle").textContent=vehicle;
+  info.style.display="block";
+}
+
+
+function expandSheet() {
+  const s=document.getElementById("bottomSheet"); const o=document.getElementById("sheetOverlay");
+  if(s)s.classList.add("expanded"); if(o)o.classList.add("active"); sheetExpanded=true;
+}
+
+function collapseSheet() {
+  const s=document.getElementById("bottomSheet"); const o=document.getElementById("sheetOverlay");
+  if(s)s.classList.remove("expanded"); if(o)o.classList.remove("active"); sheetExpanded=false;
+  ["sheet-start","sheet-destination"].forEach(id => document.getElementById(`${id}-suggestions`)?.classList.remove("active"));
+}
+
+
+function removeRoute() {
+  if(routeLayer){ try{routeLayer.setMap(null);}catch(e){try{routeLayer.remove();}catch(e2){}} routeLayer=null; }
+}
+
 async function findRoute() {
   const startRaw = document.getElementById("start").value.trim();
-  const destinationRaw = document.getElementById("destination").value.trim();
-  const vehicle = document.getElementById("vehicle").value;
-  
-  if (!startRaw || !destinationRaw) {
-    showToast("error", "❌ Missing Location", "Enter both start and destination");
-    return;
-  }
+  const destRaw  = document.getElementById("destination").value.trim();
+  const vehicle  = document.getElementById("vehicle").value;
+  if(!startRaw||!destRaw){ showToast("error","Missing Fields","Enter both start and destination"); return; }
 
-  const btn = document.getElementById("findRouteBtn");
-  btn.classList.add("loading");
-  btn.innerHTML = '<div class="spinner"></div> Finding Route...';
+  const btn=document.getElementById("findRouteBtn");
+  btn.classList.add("loading"); btn.innerHTML='<div class="spinner"></div> Calculating...';
 
-  const start = startRaw.toLowerCase().includes("nagpur") ? startRaw : `${startRaw}, Nagpur`;
-  const destination = destinationRaw.toLowerCase().includes("nagpur") ? destinationRaw : `${destinationRaw}, Nagpur`;
+  const start       = startRaw.toLowerCase().includes("nagpur")?startRaw:`${startRaw}, Nagpur`;
+  const destination = destRaw.toLowerCase().includes("nagpur")?destRaw:`${destRaw}, Nagpur`;
 
   try {
-    const res = await fetch(`${API_BASE}/api/route`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start, destination }),
-    });
+    const res  = await fetch(`${API_BASE}/api/route`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({start,destination})});
     const data = await res.json();
-    
-    if (data.error) {
-      showToast("error", "❌ Route Error", data.error);
-      btn.classList.remove("loading");
-      btn.innerHTML = '<i class="fas fa-route"></i> Find Fastest Route';
-      return;
-    }
+    if(data.error){ showToast("error","Route Error",data.error); resetRouteBtn(btn); return; }
 
-    routeCoords = data.polyline.coordinates;
+    routeCoords=data.polyline.coordinates; removeRoute();
+    new mappls.Polyline({map, path:routeCoords.map(([lng,lat])=>({lat,lng})), strokeColor:"#ffffff", strokeOpacity:0.8, strokeWeight:10});
+    routeLayer=new mappls.Polyline({map, path:routeCoords.map(([lng,lat])=>({lat,lng})), strokeColor:"#00b8d4", strokeOpacity:1, strokeWeight:6});
 
-    removeRoute();
+    const [startLng,startLat]=routeCoords[0];
+    if(carMarker)carMarker.remove();
+    carMarker=new mappls.Marker({map,position:{lat:startLat,lng:startLng},html:markerHTML("origin"),width:30,height:30});
 
-    // White border line
-    new mappls.Polyline({
-      map: map,
-      path: routeCoords.map(([lng, lat]) => ({ lat, lng })),
-      strokeColor: "#ffffff",
-      strokeOpacity: 1,
-      strokeWeight: 10
-    });
+    const [destLng,destLat]=routeCoords[routeCoords.length-1];
+    if(destinationMarker)destinationMarker.remove();
+    destinationMarker=new mappls.Marker({map,position:{lat:destLat,lng:destLng},html:markerHTML("dest"),width:34,height:44});
 
-    // Blue route line
-    routeLayer = new mappls.Polyline({
-      map: map,
-      path: routeCoords.map(([lng, lat]) => ({ lat, lng })),
-      strokeColor: "#1a73e8",
-      strokeOpacity: 0.95,
-      strokeWeight: 6
-    });
+    const lats=routeCoords.map(([,lat])=>lat); const lngs=routeCoords.map(([lng])=>lng);
+    map.fitBounds([{lat:Math.min(...lats),lng:Math.min(...lngs)},{lat:Math.max(...lats),lng:Math.max(...lngs)}]);
+    isFollowing=true;
 
-    // Start marker
-    const [startLng, startLat] = routeCoords[0];
-    if (carMarker) carMarker.remove();
-    carMarker = new mappls.Marker({
-      map: map,
-      position: { lat: startLat, lng: startLng },
-      html: '<div style="width:28px;height:28px;background:#1a73e8;border-radius:50%;border:3px solid white;box-shadow:0 0 8px rgba(26,115,232,0.6);display:flex;align-items:center;justify-content:center;"><i class="fas fa-location-arrow" style="color:white;font-size:14px;"></i></div>',
-      width: 28,
-      height: 28
-    });
+    const distText=data.distance_km.toFixed(1)+" km";
+    const etaText=data.duration_min+" min";
+    const vehText=vehicle.toUpperCase();
 
-    // Destination marker
-    const [destLng, destLat] = routeCoords[routeCoords.length - 1];
-    if (destinationMarker) destinationMarker.remove();
-    destinationMarker = new mappls.Marker({
-      map: map,
-      position: { lat: destLat, lng: destLng },
-      html: '<div style="text-align:center;"><i class="fas fa-map-marker-alt" style="color:#d32f2f;font-size:32px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));"></i></div>',
-      width: 32,
-      height: 40
-    });
+    document.getElementById("routeInfo").style.display="flex";
+    document.getElementById("routeDistance").textContent=distText;
+    document.getElementById("routeTime").textContent=etaText;
+    document.getElementById("vehicleType").textContent=vehText;
+    updateSheetRouteInfo(distText,etaText,vehText);
 
-    // Fit bounds
-    const lats = routeCoords.map(([lng, lat]) => lat);
-    const lngs = routeCoords.map(([lng, lat]) => lng);
-    map.fitBounds([
-      { lat: Math.min(...lats), lng: Math.min(...lngs) },
-      { lat: Math.max(...lats), lng: Math.max(...lngs) }
-    ]);
+    resetRouteBtn(btn);
+    updateMapStatus("ROUTE ACTIVE","active");
+    enterFullscreenMap(distText,etaText,vehText);
 
-    isFollowing = true;
+    showModernPopup({icon:"🗺️",title:"ROUTE CALCULATED",message:"Fastest emergency route is ready. Proceed with caution.",details:{"📏 Distance":distText,"⏱️ ETA":etaText,"🚗 Unit":vehText}});
 
-    // Show route info
-    document.getElementById("routeInfo").style.display = "grid";
-    document.getElementById("routeDistance").textContent = data.distance_km.toFixed(1) + " km";
-    document.getElementById("routeTime").textContent = data.duration_min + " min";
-    document.getElementById("vehicleType").textContent = vehicle.toUpperCase();
-
-    btn.classList.remove("loading");
-    btn.innerHTML = '<i class="fas fa-route"></i> Find Fastest Route';
-
-    // Show beautiful popup
-    showModernPopup({
-      icon: "🗺️",
-      title: "Route Ready!",
-      message: "Your fastest route has been calculated.",
-      details: {
-        "📏 Distance": data.distance_km.toFixed(1) + " km",
-        "⏱️ Duration": data.duration_min + " minutes",
-        "🚗 Vehicle": vehicle.toUpperCase()
-      }
-    });
-
-    // ✅ CHECK TRAFFIC ON THIS ROUTE
-    setTimeout(() => {
-      checkTrafficOnRoute();
-    }, 500);
-
-  } catch (error) {
-    showToast("error", "❌ Connection Error", "Failed to get route");
-    btn.classList.remove("loading");
-    btn.innerHTML = '<i class="fas fa-route"></i> Find Fastest Route';
+    setTimeout(()=>checkTrafficOnRoute(distText,etaText,vehText), 1500);
+  } catch(error) {
+    showToast("error","Connection Error","Could not reach route server");
+    resetRouteBtn(btn);
   }
 }
 
-// ✅ Toggle tracking
+function resetRouteBtn(btn) {
+  btn.classList.remove("loading");
+  btn.innerHTML='<i class="fas fa-route"></i><span>Find Fastest Route</span>';
+}
+
+
+function enterFullscreenMap(distance, duration, vehicle) {
+  const navbar=document.getElementById("mainNavbar"); const controls=document.getElementById("controlsPanel"); const mapSection=document.getElementById("mapview");
+  if(navbar)navbar.classList.add("hidden"); if(controls)controls.classList.add("hidden");
+  setTimeout(()=>{
+    mapSection.classList.add("fullscreen");
+    const backBtn=document.getElementById("mapBackBtn"); if(backBtn)backBtn.classList.add("visible");
+    const chip=document.getElementById("mapRouteChip");
+    if(chip){ document.getElementById("chipDistance").textContent=distance; document.getElementById("chipDuration").textContent=duration; document.getElementById("chipVehicle").textContent=vehicle; chip.classList.add("visible"); }
+    setTimeout(()=>{ if(map&&map.resize)map.resize(); },650);
+  },300);
+}
+
+function exitFullscreenMap() {
+  document.getElementById("mapBackBtn")?.classList.remove("visible");
+  document.getElementById("mapRouteChip")?.classList.remove("visible");
+  setTimeout(()=>{
+    document.getElementById("mapview")?.classList.remove("fullscreen");
+    document.getElementById("mainNavbar")?.classList.remove("hidden");
+    document.getElementById("controlsPanel")?.classList.remove("hidden");
+    setTimeout(()=>{ if(map&&map.resize)map.resize(); },650);
+  },200);
+}
+
+
 function toggleTracking() {
-  const btn = document.getElementById("startTrackingBtn");
-  const badge = document.getElementById("trackingBadge");
-  
-  if (!isTracking) {
-    startTracking();
-    isTracking = true;
-    btn.innerHTML = '<i class="fa-solid fa-pause"></i> Stop Tracking';
-    btn.style.background = "linear-gradient(88deg, #ff4b4b 60%, #d32f2f 100%)";
-    badge.style.display = "flex";
-    showToast("success", "🔴 Tracking Started", "Live location is now active");
+  const btn=document.getElementById("startTrackingBtn");
+  const badge=document.getElementById("trackingBadge");
+  const sheetBadge=document.getElementById("sheetTrackingBadge");
+  if(!isTracking){
+    startTracking(); isTracking=true;
+    if(btn){btn.innerHTML='<i class="fas fa-satellite-dish"></i><span>Stop</span>';btn.style.background="linear-gradient(135deg,#ff1744,#b71c1c)";btn.style.borderColor="transparent";}
+    if(badge)badge.style.display="flex"; if(sheetBadge)sheetBadge.style.display="flex";
+    updateMapStatus("TRACKING","active"); showToast("success","Tracking Started","Live GPS is now active");
   } else {
-    stopTracking();
-    isTracking = false;
-    btn.innerHTML = '<i class="fa-solid fa-play"></i> Start Tracking';
-    btn.style.background = "var(--button-gradient)";
-    badge.style.display = "none";
-    showToast("info", "⏹️ Tracking Stopped", "Location tracking disabled");
+    stopTracking(); isTracking=false;
+    if(btn){btn.innerHTML='<i class="fas fa-satellite-dish"></i><span>Track</span>';btn.style.background="";btn.style.borderColor="";}
+    if(badge)badge.style.display="none"; if(sheetBadge)sheetBadge.style.display="none";
+    updateMapStatus("READY","success"); showToast("info","Tracking Stopped","GPS tracking disabled");
   }
 }
 
-// ✅ Live GPS tracking
 function startTracking() {
-  if (!navigator.geolocation) {
-    showToast("error", "❌ GPS Unavailable", "Geolocation not supported");
-    return;
-  }
-
-  if (watchId) {
-    navigator.geolocation.clearWatch(watchId);
-  }
-
-  watchId = navigator.geolocation.watchPosition(
-    (pos) => {
-      const { latitude: lat, longitude: lng } = pos.coords;
-
-      if (!carMarker) {
-        carMarker = new mappls.Marker({
-          map: map,
-          position: { lat, lng },
-          html: '<div style="width:28px;height:28px;background:#1a73e8;border-radius:50%;border:3px solid white;box-shadow:0 0 8px rgba(26,115,232,0.6);display:flex;align-items:center;justify-content:center;"><i class="fas fa-location-arrow" style="color:white;font-size:14px;"></i></div>',
-          width: 28,
-          height: 28
-        });
-      } else {
-        carMarker.setPosition({ lat, lng });
-      }
-
-      if (isFollowing) {
-        map.setCenter({ lat, lng });
-      }
-
-      if (routeCoords.length > 0) {
-        const newRoute = routeCoords.filter(([x, y]) => {
-          const dist = Math.sqrt((x - lng) ** 2 + (y - lat) ** 2);
-          return dist > 0.0005;
-        });
+  if(!navigator.geolocation){showToast("error","GPS Unavailable","Geolocation not supported");return;}
+  if(watchId)navigator.geolocation.clearWatch(watchId);
+  watchId=navigator.geolocation.watchPosition(
+    (pos)=>{
+      const {latitude:lat,longitude:lng}=pos.coords;
+      const val=`${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      const c=document.getElementById("trackingCoords"); const sc=document.getElementById("sheetTrackingCoords");
+      if(c)c.textContent=val; if(sc)sc.textContent=val;
+      if(!carMarker){carMarker=new mappls.Marker({map,position:{lat,lng},html:markerHTML("origin"),width:30,height:30});}
+      else carMarker.setPosition({lat,lng});
+      if(isFollowing)map.setCenter({lat,lng});
+      if(routeCoords.length>0){
+        const newRoute=routeCoords.filter(([x,y])=>Math.sqrt((x-lng)**2+(y-lat)**2)>0.0005);
         removeRoute();
-        if (newRoute.length > 1) {
-          new mappls.Polyline({
-            map: map,
-            path: newRoute.map(([lng, lat]) => ({ lat, lng })),
-            strokeColor: "#ffffff",
-            strokeOpacity: 1,
-            strokeWeight: 10
-          });
-          routeLayer = new mappls.Polyline({
-            map: map,
-            path: newRoute.map(([lng, lat]) => ({ lat, lng })),
-            strokeColor: "#1a73e8",
-            strokeOpacity: 0.95,
-            strokeWeight: 6
-          });
+        if(newRoute.length>1){
+          new mappls.Polyline({map,path:newRoute.map(([lng,lat])=>({lat,lng})),strokeColor:"#ffffff",strokeOpacity:0.8,strokeWeight:10});
+          routeLayer=new mappls.Polyline({map,path:newRoute.map(([lng,lat])=>({lat,lng})),strokeColor:"#00b8d4",strokeOpacity:1,strokeWeight:6});
         }
       }
     },
-    (err) => showToast("error", "❌ Tracking Error", "Enable GPS permission"),
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    ()=>showToast("error","Tracking Error","Enable GPS permission"),
+    {enableHighAccuracy:true,maximumAge:0,timeout:10000}
   );
 }
 
-function stopTracking() {
-  if (watchId) {
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
+function stopTracking() { if(watchId){navigator.geolocation.clearWatch(watchId);watchId=null;} }
+
+
+const congestionLevels = {
+  low:    {color:"#00e676",message:"Route is clear — no congestion detected.",   icon:"🟢"},
+  medium: {color:"#ff9100",message:"Moderate traffic detected on route.",         icon:"🟡"},
+  high:   {color:"#ff5722",message:"Heavy traffic — proceed with caution.",       icon:"🔴"},
+  severe: {color:"#ff1744",message:"Severe congestion — consider alternate route.",icon:"⛔"}
+};
+
+const trafficSpots = [
+  {lat:21.15,lng:79.08,level:"medium",description:"Traffic light queue"},
+  {lat:21.16,lng:79.09,level:"high",  description:"Heavy vehicle movement"},
+  {lat:21.14,lng:79.10,level:"low",   description:"Clear road ahead"}
+];
+
+function checkTrafficOnRoute(distance, eta, unit) {
+  if(!routeCoords.length) return;
+  const warnings=[];
+  routeCoords.forEach((coord,idx)=>{
+    const [lng,lat]=coord;
+    trafficSpots.forEach(spot=>{
+      const dist=Math.sqrt((lat-spot.lat)**2+(lng-spot.lng)**2);
+      if(dist<0.02) warnings.push({...spot,percentage:Math.round(((idx+1)/routeCoords.length)*100)});
+    });
+  });
+  const lvlMap={low:1,medium:2,high:3,severe:4};
+  const level=warnings.length ? warnings.reduce((p,c)=>lvlMap[c.level]>lvlMap[p.level]?c:p).level : "low";
+  const info=congestionLevels[level];
+  const popup=document.getElementById("trafficPopup"); if(!popup)return;
+  popup.className=`traffic-popup ${level}`;
+  document.getElementById("trafficIcon").textContent=info.icon;
+  document.getElementById("trafficTitle").textContent="TRAFFIC ALERT";
+  document.getElementById("trafficMsg").textContent=info.message;
+  document.getElementById("tStatDistance").textContent=distance||"--";
+  document.getElementById("tStatETA").textContent=eta||"--";
+  document.getElementById("tStatUnit").textContent=unit||"--";
+  popup.classList.add("active");
+  clearTimeout(window._trafficTimer);
+  window._trafficTimer=setTimeout(closeTrafficPopup,6200);
+  if(warnings.length){
+    const worst=warnings.reduce((p,c)=>lvlMap[c.level]>lvlMap[p.level]?c:p);
+    new mappls.Marker({map,position:{lat:worst.lat,lng:worst.lng},html:`<div style="width:18px;height:18px;background:${info.color};border-radius:50%;border:2px solid white;box-shadow:0 0 10px ${info.color};"></div>`,width:18,height:18});
   }
 }
 
-// ==========================================
-// SOS ALERT WITH ALARM & HIGHLIGHTING
-// ==========================================
+function closeTrafficPopup() { document.getElementById("trafficPopup")?.classList.remove("active"); clearTimeout(window._trafficTimer); }
 
-let sosAlarmSound = null;
-let sosBlinkInterval = null;
-let audioContext = null;
 
 async function sendSOS() {
-  const loc = document.getElementById("start").value.trim();
-  if (!loc) {
-    showToast("warning", "⚠️ Location Required", "Set your location first");
-    return;
-  }
+  const loc=document.getElementById("start").value.trim();
+  if(!loc){showToast("warning","Location Required","Set your start location first");return;}
+  const btn=document.getElementById("sosBtn");
+  if(sosActive){deactivateSOS(btn);return;}
+  sosActive=true; btn.classList.add("sos-alert"); document.body.classList.add("sos-active");
 
-  const btn = document.getElementById("sosBtn");
+  let sosLat=NAGPUR_LAT,sosLng=NAGPUR_LNG;
+  if(loc.includes(",")){ const parts=loc.split(","); sosLat=parseFloat(parts[0])||NAGPUR_LAT; sosLng=parseFloat(parts[1])||NAGPUR_LNG; }
+  else if(carMarker){ const pos=carMarker.getPosition(); if(pos){sosLat=pos.lat;sosLng=pos.lng;} }
 
-  // If SOS is already active, deactivate it
-  if (sosActive) {
-    deactivateSOS(btn);
-    return;
-  }
-
-  sosActive = true;
-  btn.classList.add("sos-alert");
-  
   try {
-    const res = await fetch(`${API_BASE}/api/sos`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ location: loc }),
-    });
-    const data = await res.json();
-
-    if (data.success) {
-      // Trigger alarm sound
+    const res=await fetch(`${API_BASE}/api/sos`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:loc})});
+    const data=await res.json();
+    if(data.success){
       triggerSOSAlarm();
-      
-      // Trigger visual highlighting
-      triggerSOSHighlighting();
-
-      showModernPopup({
-        icon: "🚨",
-        title: "🚨 SOS ALERT ACTIVATED!",
-        message: "Emergency services have been notified of your location.\n\nClick SOS button again to deactivate.",
-        details: {
-          "📍 Location": loc,
-          "🕒 Time": new Date().toLocaleTimeString(),
-          "📞 Services": "Police, Ambulance, Fire",
-          "⏱️ Status": "Response Dispatched"
-        }
-      });
-
-      showToast("error", "🚨 SOS ACTIVATED", "Click SOS button to deactivate");
+      showModernPopup({icon:"🚨",title:"SOS ACTIVATED",message:"Emergency services alerted. Nearby hospitals are loading.",details:{"📍 Location":loc,"🕒 Time":new Date().toLocaleTimeString(),"📞 Services":"Police · Ambulance · Fire","⏱️ Status":"Response Dispatched"}});
+      showToast("error","🚨 SOS ACTIVATED","Tap SOS again to deactivate");
+      updateMapStatus("SOS ACTIVE","danger");
+      setTimeout(()=>fetchNearbyHospitals(sosLat,sosLng),900);
     }
-  } catch (error) {
-    console.error("SOS Error:", error);
-    showToast("error", "❌ SOS Failed", "Could not send SOS alert");
-    sosActive = false;
-    btn.classList.remove("sos-alert");
+  } catch(error) {
+    triggerSOSAlarm();
+    showToast("warning","🚨 SOS — Server Offline","Showing nearby hospitals");
+    updateMapStatus("SOS ACTIVE","danger");
+    setTimeout(()=>fetchNearbyHospitals(sosLat,sosLng),400);
   }
+  setTimeout(()=>{ if(sosActive){deactivateSOS(btn);showToast("info","SOS Auto-Deactivated","60 second timeout reached");} },60000);
+}
 
-  // Auto-deactivate after 60 seconds if not manually deactivated
-  setTimeout(() => {
-    if (sosActive) {
-      deactivateSOS(btn);
-      showToast("info", "⏱️ SOS Auto-Deactivated", "60 second timeout reached");
-    }
-  }, 60000);
+function deactivateSOS(btn) {
+  sosActive=false; btn.classList.remove("sos-alert"); document.body.classList.remove("sos-active");
+  if(sosAlarmSound){ try{ if(sosAlarmSound.interval)clearInterval(sosAlarmSound.interval); if(sosAlarmSound.oscillator)sosAlarmSound.oscillator.stop(); sosAlarmSound=null; }catch(e){} }
+  updateMapStatus("READY","success"); showToast("info","SOS Deactivated","Alert system turned off");
 }
 
 function triggerSOSAlarm() {
   try {
-    // Initialize audio context if not exists
-    if (!audioContext) {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    }
+    if(!audioContext)audioContext=new(window.AudioContext||window.webkitAudioContext)();
+    if(audioContext.state==="suspended")audioContext.resume();
+    const osc=audioContext.createOscillator(),gain=audioContext.createGain(),filter=audioContext.createBiquadFilter();
+    osc.connect(filter);filter.connect(gain);gain.connect(audioContext.destination);
+    osc.type="sine"; osc.frequency.setValueAtTime(900,audioContext.currentTime); gain.gain.setValueAtTime(0.18,audioContext.currentTime); osc.start();
+    let isHigh=true;
+    const interval=setInterval(()=>{ if(!sosActive){clearInterval(interval);return;} try{osc.frequency.setTargetAtTime(isHigh?1200:800,audioContext.currentTime,0.05);isHigh=!isHigh;}catch(e){clearInterval(interval);} },350);
+    sosAlarmSound={oscillator:osc,gainNode:gain,interval};
+  } catch(e){console.warn("Audio error:",e);}
+}
 
-    // Resume context if suspended
-    if (audioContext.state === 'suspended') {
-      audioContext.resume();
-    }
 
-    // Create oscillator for siren sound
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    const filter = audioContext.createBiquadFilter();
-    
-    // Connect nodes
-    oscillator.connect(filter);
-    filter.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    
-    // Configure oscillator
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-    
-    // Configure gain
-    gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
-    
-    // Start oscillator
-    oscillator.start(audioContext.currentTime);
-    
-    // Siren pattern: alternating frequency
-    let isHigh = true;
-    let pattern = 0;
-    
-    const sirenInterval = setInterval(() => {
-      if (sosActive) {
-        try {
-          if (pattern % 2 === 0) {
-            oscillator.frequency.setTargetAtTime(
-              isHigh ? 1200 : 800, 
-              audioContext.currentTime, 
-              0.05
-            );
-            isHigh = !isHigh;
-          }
-          pattern++;
-        } catch (e) {
-          clearInterval(sirenInterval);
-        }
-      }
-    }, 300);
-    
-    sosAlarmSound = {
-      oscillator: oscillator,
-      gainNode: gainNode,
-      filter: filter,
-      context: audioContext,
-      interval: sirenInterval,
-      startTime: audioContext.currentTime
-    };
+async function fetchNearbyHospitals(lat, lng) {
+  const modal=document.getElementById("hospitalModal"); const list=document.getElementById("hospitalList");
+  if(!modal||!list)return;
+  modal.classList.add("active");
+  list.innerHTML=`<div class="hospital-loading"><div class="hospital-spinner"></div><span>Scanning nearby hospitals...</span></div>`;
 
-  } catch (error) {
-    console.warn("Audio context error:", error);
-    // Fallback: Use visual alert only
-    showToast("warning", "⚠️ Audio Not Available", "Using visual alert only");
+  try {
+    const token=await getMapplsToken();
+    const res=await fetch(`https://atlas.mappls.com/api/places/nearby/json?keywords=hospital&refLocation=${lat},${lng}&radius=5000&sortBy=dist&region=IND`,
+      {headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"}});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const data=await res.json();
+    const places=data.suggestedLocations||data.results||[];
+    if(!places.length)throw new Error("No results");
+
+    list.innerHTML=places.slice(0,8).map(h=>{
+      const name=h.placeName||h.name||"Hospital";
+      const addr=h.placeAddress||h.address||"Nagpur";
+      const dist=h.distance?(h.distance>=1000?(h.distance/1000).toFixed(1)+" km":Math.round(h.distance)+" m"):"--";
+      const dLat=h.latitude||lat; const dLng=h.longitude||lng;
+      const safe=name.replace(/'/g,"\\'");
+      return `<div class="hospital-card"><div class="hospital-card-icon">🏥</div><div class="hospital-card-info"><div class="hospital-card-name" title="${name}">${name}</div><div class="hospital-card-address" title="${addr}">${addr}</div></div><div class="hospital-card-distance">${dist}</div><button class="hosp-route-btn" onclick="routeToHospital('${safe}',${dLat},${dLng})">Route</button></div>`;
+    }).join("");
+  } catch(err) {
+    console.warn("Hospital API failed, using fallback:", err);
+    showFallbackHospitals(list,lat,lng);
   }
 }
 
-function triggerSOSHighlighting() {
-  // Add red blinking effect to body
-  document.body.style.animation = "sosFlash 0.5s infinite";
-  document.body.style.backgroundColor = "rgba(255, 0, 0, 0.1)";
-  
-  // Highlight header
-  const header = document.querySelector('header');
-  if (header) {
-    header.style.boxShadow = '0 0 30px 5px rgba(255, 75, 75, 0.9)';
-    header.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
-  }
-  
-  // Highlight controls
-  const controls = document.querySelector('.controls');
-  if (controls) {
-    controls.style.boxShadow = '0 0 30px 5px rgba(255, 75, 75, 0.9)';
-    controls.style.borderColor = '#ff4b4b';
-    controls.style.borderWidth = '3px';
-  }
-  
-  // Highlight SOS button
-  const sosBtn = document.getElementById('sosBtn');
-  if (sosBtn) {
-    sosBtn.style.boxShadow = '0 0 40px 8px rgba(255, 75, 75, 0.9)';
-    sosBtn.style.borderColor = '#ff4b4b';
-    sosBtn.style.borderWidth = '2px';
-  }
-
-  // Add pulsing red border to entire page
-  document.documentElement.style.borderLeft = '6px solid #ff4b4b';
-  document.documentElement.style.borderRight = '6px solid #ff4b4b';
-  document.documentElement.style.borderTop = '6px solid #ff4b4b';
-  document.documentElement.style.borderBottom = '6px solid #ff4b4b';
-}
-
-function deactivateSOS(btn) {
-  sosActive = false;
-  btn.classList.remove("sos-alert");
-  
-  // Stop alarm
-  if (sosAlarmSound) {
-    try {
-      // Clear interval first
-      if (sosAlarmSound.interval) {
-        clearInterval(sosAlarmSound.interval);
-      }
-      
-      // Stop oscillator
-      if (sosAlarmSound.oscillator) {
-        sosAlarmSound.oscillator.stop(sosAlarmSound.context.currentTime);
-      }
-      
-      sosAlarmSound = null;
-    } catch (error) {
-      console.warn("Error stopping alarm:", error);
-    }
-  }
-  
-  // Remove visual effects with smooth transition
-  document.body.style.animation = "none";
-  document.body.style.backgroundColor = "";
-  
-  document.documentElement.style.borderLeft = "none";
-  document.documentElement.style.borderRight = "none";
-  document.documentElement.style.borderTop = "none";
-  document.documentElement.style.borderBottom = "none";
-  
-  // Remove highlights from all elements
-  const allElements = document.querySelectorAll('header, .controls, #sosBtn');
-  allElements.forEach(el => {
-    el.style.boxShadow = '';
-    el.style.borderColor = '';
-    el.style.borderWidth = '';
-    el.style.backgroundColor = '';
+function showFallbackHospitals(list, lat, lng) {
+  const hospitals=[
+    {name:"AIIMS Nagpur",             addr:"Mihan, Nagpur",             lat:21.0778,lng:79.0538},
+    {name:"GMCH Nagpur",              addr:"Medical Square, Nagpur",    lat:21.1502,lng:79.0849},
+    {name:"Orange City Hospital",     addr:"Khamla Road, Nagpur",       lat:21.1314,lng:79.0576},
+    {name:"Alexis Multispeciality",   addr:"Dairy Farm, Nagpur",        lat:21.1567,lng:79.0412},
+    {name:"Wockhardt Hospital",       addr:"Ramdaspeth, Nagpur",        lat:21.1423,lng:79.0781},
+    {name:"Care Hospital",            addr:"Dhantoli, Nagpur",          lat:21.1388,lng:79.0892},
+    {name:"NKP Salve Medical College",addr:"Digdoh Hills, Nagpur",      lat:21.1089,lng:79.0634},
+    {name:"Lata Mangeshkar Hospital", addr:"Digdoh, Nagpur",            lat:21.1102,lng:79.0589},
+  ];
+  hospitals.sort((a,b)=>{
+    const dA=Math.sqrt(Math.pow((lat-a.lat)*111,2)+Math.pow((lng-a.lng)*111,2));
+    const dB=Math.sqrt(Math.pow((lat-b.lat)*111,2)+Math.pow((lng-b.lng)*111,2));
+    return dA-dB;
   });
-
-  showToast("info", "🔕 SOS Deactivated", "Alert system turned off");
+  list.innerHTML=hospitals.slice(0,5).map(h=>{
+    const distKm=Math.sqrt(Math.pow((lat-h.lat)*111,2)+Math.pow((lng-h.lng)*111,2)).toFixed(1);
+    const safe=h.name.replace(/'/g,"\\'");
+    return `<div class="hospital-card"><div class="hospital-card-icon">🏥</div><div class="hospital-card-info"><div class="hospital-card-name">${h.name}</div><div class="hospital-card-address">${h.addr}</div></div><div class="hospital-card-distance">~${distKm} km</div><button class="hosp-route-btn" onclick="routeToHospital('${safe}',${h.lat},${h.lng})">Route</button></div>`;
+  }).join("");
 }
 
-// ✅ Emergency contacts
-const emergencyContacts = [
-  { name: "Police", number: "100", icon: "🚓", color: "#2979ff" },
-  { name: "Ambulance", number: "108", icon: "🚑", color: "#43a047" },
-  { name: "Fire Station", number: "101", icon: "🔥", color: "#d32f2f" },
-  { name: "Women Helpline", number: "1091", icon: "👩‍🦰", color: "#ff4081" },
+function closeHospitalModal() { document.getElementById("hospitalModal")?.classList.remove("active"); }
+
+function routeToHospital(name,lat,lng) {
+  closeHospitalModal();
+  document.getElementById("destination").value=name;
+  showToast("info","🏥 Routing to hospital",name);
+  findRoute();
+}
+
+
+const emergencyContacts=[
+  {name:"Police",        number:"100",  icon:"🚓",color:"#2196f3"},
+  {name:"Ambulance",     number:"108",  icon:"🚑",color:"#4caf50"},
+  {name:"Fire Station",  number:"101",  icon:"🔥",color:"#ff5722"},
+  {name:"Women Helpline",number:"1091", icon:"👩",color:"#e91e63"},
 ];
 
 function loadEmergencyContacts() {
-  const c = document.getElementById("emergency-contacts");
-  c.innerHTML = "";
-  emergencyContacts.forEach((x) => {
-    c.innerHTML += `
-      <div class="contact-card" style="border-left:4px solid ${x.color}; cursor: pointer;" onclick="callEmergency('${x.number}', '${x.name}')">
-        <h3>${x.icon} ${x.name}</h3>
-        <p>${x.number}</p>
-      </div>
-    `;
+  const container=document.getElementById("emergency-contacts"); if(!container)return;
+  container.innerHTML=emergencyContacts.map(x=>`
+    <div class="contact-card" style="border-left:3px solid ${x.color};" onclick="callEmergency('${x.number}','${x.name}')">
+      <div class="contact-icon-wrap" style="background:${x.color}22;border-color:${x.color}44;"><span style="font-size:20px;">${x.icon}</span></div>
+      <div class="contact-info"><div class="contact-name">${x.name}</div><div class="contact-number">${x.number}</div></div>
+      <i class="fas fa-phone-alt contact-call-icon"></i>
+    </div>`).join("");
+}
+
+function callEmergency(number,name) {
+  showModernPopup({icon:"📞",title:`CALL ${name.toUpperCase()}`,message:`Dial ${number} immediately to reach ${name} emergency services.`,details:{"📞 Number":number,"🏢 Service":name,"⏱️ Available":"24/7 Emergency"}});
+  showToast("info",`📞 ${name}`,`Dial: ${number}`);
+}
+
+
+function showToast(type,title,message="") {
+  const container=document.getElementById("notificationContainer"); if(!container)return;
+  const toast=document.createElement("div"); toast.className=`toast ${type}`;
+  const icons={success:"✅",error:"🚨",warning:"⚠️",info:"ℹ️"};
+  toast.innerHTML=`<div class="toast-icon">${icons[type]||"ℹ️"}</div><div class="toast-content"><div class="toast-title">${title}</div>${message?`<div class="toast-message">${message}</div>`:""}</div>`;
+  container.appendChild(toast);
+  setTimeout(()=>{ toast.classList.add("removing"); setTimeout(()=>toast.remove(),380); },3200);
+}
+
+
+function showModernPopup(config) {
+  document.getElementById("popupIcon").textContent=config.icon||"✅";
+  document.getElementById("popupTitle").textContent=config.title||"Notice";
+  document.getElementById("popupMessage").textContent=config.message||"";
+  const d=document.getElementById("popupDetails");
+  if(config.details&&Object.keys(config.details).length){
+    d.innerHTML=Object.entries(config.details).map(([k,v])=>`<div><span class="label">${k}</span><span class="value">${v}</span></div>`).join("");
+    d.style.display="block";
+  } else d.style.display="none";
+  document.getElementById("modernPopup").style.display="flex";
+}
+
+function closeModernPopup() { document.getElementById("modernPopup").style.display="none"; }
+function showPopup(txt) { document.getElementById("popup-text").innerText=txt; document.getElementById("popup").style.display="flex"; }
+function closePopup() { document.getElementById("popup").style.display="none"; }
+
+
+function updateActiveNav() {
+  const sections=["home","mapview","contacts","about"]; const hrefs=["#home","#mapview","#contacts","#about"]; let current="home";
+  sections.forEach(id=>{ const el=document.getElementById(id); if(el&&window.scrollY>=el.offsetTop-100)current=id; });
+  document.querySelectorAll(".nav-link").forEach((link,i)=>link.classList.toggle("active",hrefs[i]===`#${current}`));
+}
+window.addEventListener("scroll",updateActiveNav,{passive:true});
+
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadEmergencyContacts();
+  updateClock();
+
+  const s=document.getElementById("bottomSheet");
+  const handleArea=document.getElementById("sheetHandleArea");
+  if(!s||!handleArea)return;
+
+  let dragStartY=0, dragStartTY=0, dragging=false;
+
+  function getCurrentTY() {
+    const matrix=new DOMMatrix(window.getComputedStyle(s).transform);
+    return matrix.m42;
+  }
+
+  handleArea.addEventListener("touchstart",(e)=>{
+    dragStartY=e.touches[0].clientY; dragStartTY=getCurrentTY(); dragging=true; s.style.transition="none";
+  },{passive:true});
+
+  handleArea.addEventListener("touchmove",(e)=>{
+    if(!dragging)return;
+    const delta=e.touches[0].clientY-dragStartY;
+    const newY=Math.max(0,dragStartTY+delta);
+    s.style.transform=`translateY(${newY}px)`;
+  },{passive:true});
+
+  handleArea.addEventListener("touchend",(e)=>{
+    dragging=false; s.style.transition=""; s.style.transform="";
+    const delta=e.changedTouches[0].clientY-dragStartY;
+    if(sheetExpanded){ delta>80?collapseSheet():expandSheet(); }
+    else { delta<-60?expandSheet():collapseSheet(); }
   });
-}
 
-function callEmergency(number, name) {
-  showModernPopup({
-    icon: "📞",
-    title: `Call ${name}`,
-    message: `Dial ${number} to reach ${name}.`,
-    details: {
-      "📞 Number": number,
-      "🏢 Service": name,
-      "⏱️ Available": "24/7"
-    }
-  });
-  showToast("info", `📞 ${name}`, `Number: ${number}`);
-}
-
-// Initialize on load
-document.addEventListener("DOMContentLoaded", loadEmergencyContacts);
-
-// Old backup popup (kept for compatibility)
-function showPopup(txt) {
-  const popup = document.getElementById("popup");
-  document.getElementById("popup-text").innerText = txt;
-  popup.style.display = "flex";
-}
-
-function closePopup() {
-  document.getElementById("popup").style.display = "none";
-}
+  handleArea.addEventListener("click",()=>{ sheetExpanded?collapseSheet():expandSheet(); });
+});

@@ -1,182 +1,764 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Dynamic Emergency Vehicle Route Planner</title>
+  <title>DEVRP — Dynamic Emergency Vehicle Route Planner</title>
 
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
-
-  <!-- ✅ MAPPLS MAP SDK (replaces Leaflet) -->
-
+  
   <script
     src="https://apis.mappls.com/advancedmaps/api/e4c70b528058ef82f6c4b85b546c30b1/map_sdk?layer=vector&v=3.0&callback=initMap"
     defer></script>
 
   <style>
-    #map {
-      width: 100%;
-      height: 450px;
-      border-radius: 10px;
+    
+    .sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(4px);
+      z-index: 299;
+    }
+    .sheet-overlay.active { display: block; }
+
+    .bottom-sheet {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 300;
+      background: var(--bg-secondary);
+      border-top: 1.5px solid var(--border-strong);
+      border-radius: 22px 22px 0 0;
+      box-shadow: 0 -8px 40px rgba(0,0,0,0.55);
+      transform: translateY(calc(100% - 88px));
+      transition: transform 0.42s cubic-bezier(0.32,0.72,0,1);
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      touch-action: none;
+      will-change: transform;
+    }
+    .bottom-sheet.expanded { transform: translateY(0); }
+
+    .sheet-handle-area {
+      padding: 12px 16px 10px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .sheet-handle {
+      width: 40px; height: 4px;
+      background: var(--border-strong);
+      border-radius: 4px;
+      margin: 0 auto 12px;
+      transition: background 0.2s, width 0.2s;
+    }
+    .bottom-sheet.expanded .sheet-handle {
+      width: 56px;
+      background: var(--accent);
+    }
+
+    /* Peek bar */
+    .sheet-peek {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .peek-inputs {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 14px;
+      min-width: 0;
+    }
+    .peek-field {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex: 1;
+      min-width: 0;
+      cursor: pointer;
+    }
+    .peek-field span {
+      font-size: 13px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: 'DM Sans', sans-serif;
+    }
+    .peek-field span.has-value {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+    .peek-origin-icon { color: var(--accent);  font-size: 13px; flex-shrink: 0; }
+    .peek-dest-icon   { color: var(--danger);  font-size: 13px; flex-shrink: 0; }
+    .peek-arrow { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+
+    .peek-route-btn {
+      width: 46px; height: 46px;
+      border-radius: 14px;
+      background: var(--grad-btn, linear-gradient(135deg,#00b8d4,#0077b6));
+      border: none; color: white; font-size: 17px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 0 16px rgba(0,229,255,0.3);
+      transition: all 0.2s;
+    }
+    .peek-route-btn:hover { transform: scale(1.07); }
+
+    /* Sheet body */
+    .sheet-body {
+      overflow-y: auto;
+      padding: 6px 16px 100px;
+      flex: 1;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.3s ease 0.1s, transform 0.3s ease 0.1s;
+      pointer-events: none;
+    }
+    .bottom-sheet.expanded .sheet-body {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: all;
+    }
+    .sheet-body::-webkit-scrollbar { width: 4px; }
+    .sheet-body::-webkit-scrollbar-thumb {
+      background: var(--border-strong); border-radius: 4px;
+    }
+
+    .sheet-section-title {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      color: var(--text-secondary);
+      letter-spacing: 2px;
+      margin: 14px 0 8px;
+    }
+    .sheet-action-row {
+      display: flex; gap: 10px; margin-top: 16px;
+    }
+    .sheet-find-btn { flex: 1; }
+
+    /* Sheet route info */
+    .sheet-route-info {
+      margin-top: 14px;
+      background: var(--accent-dim, rgba(0,229,255,0.08));
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      overflow: hidden;
+      animation: slideDown 0.35s ease;
+    }
+    .sri-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 13px; font-weight: 700; letter-spacing: 1px;
+      color: var(--success, #00e676);
+    }
+    .sri-stats { display: flex; align-items: center; }
+    .sri-stat {
+      flex: 1; display: flex; align-items: center;
+      gap: 10px; padding: 12px 14px;
+      font-size: 15px; color: var(--accent);
+    }
+    .sri-stat i { font-size: 15px; flex-shrink: 0; }
+    .sri-stat div { display: flex; flex-direction: column; gap: 2px; }
+    .sri-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px; color: var(--text-muted); letter-spacing: 2px;
+    }
+    .sri-value { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+    .sri-value.mono {
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--accent);
+      text-shadow: 0 0 8px rgba(0,229,255,0.4);
+    }
+
+    /* Desktop: hide sheet, show controls */
+    @media (min-width: 769px) {
+      .bottom-sheet  { display: none !important; }
+      .sheet-overlay { display: none !important; }
+    }
+
+    /* Mobile: hide desktop controls, show map + sheet */
+    @media (max-width: 768px) {
+      .command-main  { display: none !important; }
+      .bottom-sheet  { display: flex !important; }
+      .map-section   { margin-top: 0 !important; padding: 0 !important; }
+      #map {
+        height: 100vh !important;
+        border-radius: 0 !important;
+        border: none !important;
+      }
+      .map-statusbar {
+        position: fixed !important;
+        top: 60px; left: 0; right: 0;
+        z-index: 50;
+        border-radius: 0 !important;
+        border: none !important;
+        background: rgba(7,14,26,0.88) !important;
+        backdrop-filter: blur(10px);
+      }
+    }
+
+    /* ── TRAFFIC POPUP ── */
+    .traffic-popup {
+      position: fixed;
+      bottom: 110px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      z-index: 400;
+      width: min(92%, 480px);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-strong);
+      border-radius: 18px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      backdrop-filter: blur(16px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease,
+                  transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+      overflow: hidden;
+    }
+    .traffic-popup.active {
+      opacity: 1;
+      pointer-events: all;
+      transform: translateX(-50%) translateY(0);
+    }
+    .traffic-popup.low    { border-left: 4px solid #00e676; }
+    .traffic-popup.medium { border-left: 4px solid #ff9100; }
+    .traffic-popup.high   { border-left: 4px solid #ff5722; }
+    .traffic-popup.severe { border-left: 4px solid #ff1744; }
+
+    .traffic-popup-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .traffic-icon { font-size: 28px; flex-shrink: 0; }
+    .traffic-title {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 15px; font-weight: 700;
+      letter-spacing: 1px; color: var(--text-primary);
+    }
+    .traffic-msg {
+      font-size: 12px; color: var(--text-secondary);
+      margin-top: 2px; line-height: 1.4;
+    }
+    .traffic-close {
+      margin-left: auto;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      width: 30px; height: 30px; border-radius: 8px;
+      color: var(--text-secondary); font-size: 12px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.2s;
+    }
+    .traffic-close:hover {
+      background: rgba(255,23,68,0.1);
+      border-color: #ff1744; color: #ff1744;
+      transform: rotate(90deg);
+    }
+    .traffic-stats {
+      display: flex; align-items: center;
+      padding: 12px 16px;
+      background: rgba(0,229,255,0.06);
+    }
+    .tstat {
+      flex: 1; display: flex;
+      flex-direction: column; align-items: center; gap: 3px;
+    }
+    .tstat-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px; color: var(--text-muted); letter-spacing: 2px;
+    }
+    .tstat-value { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+    .tstat-value.mono {
+      font-family: 'Share Tech Mono', monospace;
+      color: var(--accent);
+      text-shadow: 0 0 8px rgba(0,229,255,0.4);
+    }
+    .tstat-divider {
+      width: 1px; height: 28px;
+      background: var(--border); flex-shrink: 0;
+    }
+    .traffic-popup::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0;
+      height: 3px; width: 0;
+      background: var(--accent);
+    }
+    .traffic-popup.active::after {
+      animation: trafficTimer 6s linear forwards;
+    }
+    @keyframes trafficTimer {
+      from { width: 100%; }
+      to   { width: 0%; }
     }
   </style>
 </head>
 
 <body>
-  <!-- Theme Toggle Button -->
-  <div class="theme-toggle">
-    <button id="themeToggle" onclick="toggleTheme()">
-      <i class="fas fa-moon"></i>
-    </button>
-  </div>
 
-  <header>🚨 Dynamic Emergency Vehicle Route Planner</header>
+  <!-- ========== HEADER ========== -->
+  <header class="site-header">
+    <div class="header-brand">
+      <div class="header-emblem">
+        <div class="emblem-ring"></div>
+        <span class="emblem-icon">🚨</span>
+      </div>
+      <div class="header-titles">
+        <span class="header-label">DYNAMIC EMERGENCY</span>
+        <span class="header-sub">VEHICLE ROUTE PLANNER</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="system-status">
+        <span class="status-dot active"></span>
+        <span class="status-text">SYSTEM ACTIVE</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="header-clock-block">
+        <span class="clock-label">LOCAL TIME</span>
+        <span id="liveClock" class="live-clock">--:--:--</span>
+      </div>
+      <button id="themeToggle" class="theme-btn" onclick="toggleTheme()" title="Toggle Theme">
+        <i class="fas fa-moon"></i>
+      </button>
+    </div>
+  </header>
 
-  <nav class="navbar">
-    <ul>
-      <li><a href="#home">Home</a></li>
-      <li><a href="#mapview">Map</a></li>
-      <li><a href="#contacts">Contacts</a></li>
-      <li><a href="#about">About</a></li>
-    </ul>
+  <!-- ========== NAVBAR ========== -->
+  <nav class="navbar" id="mainNavbar">
+    <div class="navbar-inner">
+      <ul class="nav-links">
+        <li><a href="#home" class="nav-link active"><i class="fas fa-tachometer-alt"></i><span>Command</span></a></li>
+        <li><a href="#mapview" class="nav-link"><i class="fas fa-map"></i><span>Map</span></a></li>
+        <li><a href="#contacts" class="nav-link"><i class="fas fa-phone-alt"></i><span>Contacts</span></a></li>
+        <li><a href="#about" class="nav-link"><i class="fas fa-info-circle"></i><span>About</span></a></li>
+      </ul>
+      <div class="nav-badge">
+        <span class="nav-region">📡 NAGPUR REGION</span>
+      </div>
+    </div>
   </nav>
 
-  <main id="home">
-    <div class="controls">
+  <!-- ========== MAIN COMMAND PANEL (desktop only) ========== -->
+  <main id="home" class="command-main">
+    <div class="controls" id="controlsPanel">
+
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <span class="panel-tag">DISPATCH CONSOLE</span>
+          <h2 class="panel-title">Route Configuration</h2>
+        </div>
+        <div class="panel-live-indicator">
+          <span class="live-dot"></span>
+          <span>LIVE</span>
+        </div>
+      </div>
+
+      <div class="field-label">EMERGENCY UNIT</div>
+      <div class="vehicle-selector">
+        <div class="vehicle-card active" onclick="selectVehicle('ambulance', this)">
+          <span class="v-icon">🚑</span><span class="v-name">Ambulance</span>
+        </div>
+        <div class="vehicle-card" onclick="selectVehicle('firetruck', this)">
+          <span class="v-icon">🚒</span><span class="v-name">Fire Truck</span>
+        </div>
+        <div class="vehicle-card" onclick="selectVehicle('police', this)">
+          <span class="v-icon">🚓</span><span class="v-name">Police</span>
+        </div>
+      </div>
+      <input type="hidden" id="vehicle" value="ambulance">
+
+      <div class="field-label">ORIGIN</div>
       <div class="input-group">
-        <i class="fas fa-map-marker-alt"></i>
-        <input id="start" type="text" placeholder="Enter Pickup Location or click 📍" />
-        <button class="gps-btn" onclick="getLocation()">📍</button>
+        <div class="input-icon origin-icon"><i class="fas fa-map-marker-alt"></i></div>
+        <div class="autocomplete-wrapper">
+          <input id="start" type="text" placeholder="Enter pickup location..."
+            autocomplete="off"
+            oninput="handleAutosuggest('start')"
+            onkeydown="handleSuggestKey(event,'start')" />
+          <ul class="suggestions-list" id="start-suggestions"></ul>
+        </div>
+        <button class="gps-btn" onclick="getLocation()" title="Use my location">
+          <i class="fas fa-crosshairs"></i>
+        </button>
       </div>
 
+      <div class="field-label">DESTINATION</div>
       <div class="input-group">
-        <i class="fas fa-location-dot"></i>
-        <input id="destination" type="text" placeholder="Enter Destination (e.g., hospital)" />
+        <div class="input-icon dest-icon"><i class="fas fa-location-dot"></i></div>
+        <div class="autocomplete-wrapper">
+          <input id="destination" type="text" placeholder="Enter destination..."
+            autocomplete="off"
+            oninput="handleAutosuggest('destination')"
+            onkeydown="handleSuggestKey(event,'destination')" />
+          <ul class="suggestions-list" id="destination-suggestions"></ul>
+        </div>
       </div>
 
-      <div class="input-group">
-        <i class="fas fa-car"></i>
-        <select id="vehicle">
-          <option value="ambulance">🚑 Ambulance</option>
-          <option value="firetruck">🚒 Fire Truck</option>
-          <option value="police">🚓 Police Vehicle</option>
-        </select>
-      </div>
-
-      <div class="control-row">
-        <button class="btn" id="findRouteBtn" onclick="findRoute()">
-          <i class="fas fa-route"></i> Find Fastest Route
+      <div class="action-row">
+        <button class="btn btn-primary" id="findRouteBtn" onclick="findRoute()">
+          <i class="fas fa-route"></i><span>Find Fastest Route</span>
         </button>
-        <button class="btn danger" id="sosBtn" onclick="sendSOS()">
-          <i class="fas fa-bell"></i> SOS
+        <button class="btn btn-track" id="startTrackingBtn" onclick="toggleTracking()">
+          <i class="fa-solid fa-satellite-dish"></i><span>Track</span>
         </button>
       </div>
 
-      <div class="control-row">
-        <button class="btn" id="startTrackingBtn" onclick="toggleTracking()">
-          <i class="fa-solid fa-play"></i> Start Tracking
-        </button>
-      </div>
-
-      <!-- Route Info Display -->
       <div class="route-info" id="routeInfo" style="display:none;">
         <div class="route-stat">
-          <i class="fas fa-road"></i>
-          <div>
-            <span class="label">Distance</span>
-            <span class="value" id="routeDistance">--</span>
+          <span class="stat-icon"><i class="fas fa-road"></i></span>
+          <div class="stat-data">
+            <span class="stat-label">DISTANCE</span>
+            <span class="stat-value mono" id="routeDistance">--</span>
           </div>
         </div>
+        <div class="route-divider"></div>
         <div class="route-stat">
-          <i class="fas fa-clock"></i>
-          <div>
-            <span class="label">Duration</span>
-            <span class="value" id="routeTime">--</span>
+          <span class="stat-icon"><i class="fas fa-clock"></i></span>
+          <div class="stat-data">
+            <span class="stat-label">ETA</span>
+            <span class="stat-value mono" id="routeTime">--</span>
           </div>
         </div>
+        <div class="route-divider"></div>
         <div class="route-stat">
-          <i class="fas fa-car"></i>
-          <div>
-            <span class="label">Vehicle</span>
-            <span class="value" id="vehicleType">--</span>
+          <span class="stat-icon"><i class="fas fa-car"></i></span>
+          <div class="stat-data">
+            <span class="stat-label">UNIT</span>
+            <span class="stat-value mono" id="vehicleType">--</span>
           </div>
         </div>
       </div>
 
-      <!-- Tracking Badge -->
       <div class="tracking-badge" id="trackingBadge" style="display:none;">
         <div class="tracking-dot"></div>
-        <span id="trackingStatus">🔴 Tracking Active</span>
+        <span id="trackingStatus">TRACKING ACTIVE</span>
+        <span class="tracking-coords" id="trackingCoords"></span>
       </div>
+
     </div>
   </main>
 
-  <section id="mapview">
+  
+  <div class="sheet-overlay" id="sheetOverlay" onclick="collapseSheet()"></div>
+
+  <div class="bottom-sheet" id="bottomSheet">
+
+    <div class="sheet-handle-area" id="sheetHandleArea">
+      <div class="sheet-handle"></div>
+      <div class="sheet-peek">
+        <div class="peek-inputs">
+          <div class="peek-field" onclick="expandSheet()">
+            <i class="fas fa-map-marker-alt peek-origin-icon"></i>
+            <span id="peekStart">Where from?</span>
+          </div>
+          <div class="peek-arrow"><i class="fas fa-chevron-right"></i></div>
+          <div class="peek-field" onclick="expandSheet()">
+            <i class="fas fa-location-dot peek-dest-icon"></i>
+            <span id="peekDest">Where to?</span>
+          </div>
+        </div>
+        <button class="peek-route-btn" onclick="findRouteFromSheet()">
+          <i class="fas fa-route"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="sheet-body" id="sheetBody">
+
+      <div class="sheet-section-title">EMERGENCY UNIT</div>
+      <div class="vehicle-selector">
+        <div class="vehicle-card active" onclick="selectVehicle('ambulance', this)">
+          <span class="v-icon">🚑</span><span class="v-name">Ambulance</span>
+        </div>
+        <div class="vehicle-card" onclick="selectVehicle('firetruck', this)">
+          <span class="v-icon">🚒</span><span class="v-name">Fire Truck</span>
+        </div>
+        <div class="vehicle-card" onclick="selectVehicle('police', this)">
+          <span class="v-icon">🚓</span><span class="v-name">Police</span>
+        </div>
+      </div>
+
+      <div class="sheet-section-title">ORIGIN</div>
+      <div class="input-group">
+        <div class="input-icon origin-icon"><i class="fas fa-map-marker-alt"></i></div>
+        <div class="autocomplete-wrapper">
+          <input id="sheet-start" type="text" placeholder="Enter pickup location..."
+            autocomplete="off"
+            oninput="handleAutosuggestSheet('sheet-start','start')"
+            onkeydown="handleSuggestKey(event,'sheet-start')" />
+          <ul class="suggestions-list" id="sheet-start-suggestions"></ul>
+        </div>
+        <button class="gps-btn" onclick="getLocationSheet()" title="Use my location">
+          <i class="fas fa-crosshairs"></i>
+        </button>
+      </div>
+
+      <div class="sheet-section-title">DESTINATION</div>
+      <div class="input-group">
+        <div class="input-icon dest-icon"><i class="fas fa-location-dot"></i></div>
+        <div class="autocomplete-wrapper">
+          <input id="sheet-destination" type="text" placeholder="Enter destination..."
+            autocomplete="off"
+            oninput="handleAutosuggestSheet('sheet-destination','destination')"
+            onkeydown="handleSuggestKey(event,'sheet-destination')" />
+          <ul class="suggestions-list" id="sheet-destination-suggestions"></ul>
+        </div>
+      </div>
+
+      <div class="sheet-action-row">
+        <button class="btn btn-primary sheet-find-btn" onclick="findRouteFromSheet()">
+          <i class="fas fa-route"></i><span>Find Fastest Route</span>
+        </button>
+        <button class="btn btn-track" onclick="toggleTracking()">
+          <i class="fa-solid fa-satellite-dish"></i><span>Track</span>
+        </button>
+      </div>
+
+      <div class="sheet-route-info" id="sheetRouteInfo" style="display:none;">
+        <div class="sri-header">
+          <i class="fas fa-check-circle sri-check"></i>
+          <span>ROUTE READY</span>
+        </div>
+        <div class="sri-stats">
+          <div class="sri-stat">
+            <i class="fas fa-road"></i>
+            <div>
+              <span class="sri-label">DISTANCE</span>
+              <span class="sri-value mono" id="sheetDistance">--</span>
+            </div>
+          </div>
+          <div class="sri-stat">
+            <i class="fas fa-clock"></i>
+            <div>
+              <span class="sri-label">ETA</span>
+              <span class="sri-value mono" id="sheetTime">--</span>
+            </div>
+          </div>
+          <div class="sri-stat">
+            <i class="fas fa-car"></i>
+            <div>
+              <span class="sri-label">UNIT</span>
+              <span class="sri-value mono" id="sheetVehicle">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tracking-badge" id="sheetTrackingBadge" style="display:none;">
+        <div class="tracking-dot"></div>
+        <span>TRACKING ACTIVE</span>
+        <span class="tracking-coords" id="sheetTrackingCoords"></span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========== TRAFFIC CONGESTION POPUP ========== -->
+  <div id="trafficPopup" class="traffic-popup">
+    <div class="traffic-popup-inner">
+      <div class="traffic-popup-header">
+        <span class="traffic-icon" id="trafficIcon">🚦</span>
+        <div>
+          <div class="traffic-title" id="trafficTitle">TRAFFIC ALERT</div>
+          <div class="traffic-msg" id="trafficMsg">Checking route...</div>
+        </div>
+        <button class="traffic-close" onclick="closeTrafficPopup()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="traffic-stats">
+        <div class="tstat">
+          <span class="tstat-label">DISTANCE</span>
+          <span class="tstat-value mono" id="tStatDistance">--</span>
+        </div>
+        <div class="tstat-divider"></div>
+        <div class="tstat">
+          <span class="tstat-label">ETA</span>
+          <span class="tstat-value mono" id="tStatETA">--</span>
+        </div>
+        <div class="tstat-divider"></div>
+        <div class="tstat">
+          <span class="tstat-label">UNIT</span>
+          <span class="tstat-value mono" id="tStatUnit">--</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== MAP SECTION ========== -->
+  <section id="mapview" class="map-section">
+    <div class="map-statusbar" id="mapStatusBar">
+      <div class="map-status-left">
+        <span class="map-status-item">
+          <i class="fas fa-satellite-dish"></i> NAGPUR REGION
+        </span>
+        <span class="map-status-item" id="mapZoomDisplay">
+          <i class="fas fa-search-plus"></i> ZOOM: 13
+        </span>
+      </div>
+      <div class="map-status-right">
+        <span class="map-live-badge" id="mapLiveBadge">⬤ READY</span>
+      </div>
+    </div>
     <div id="map"></div>
   </section>
 
+  <!-- ========== SOS FLOATING BUTTON ========== -->
+  <button id="sosBtn" class="sos-float-btn" onclick="sendSOS()" title="Emergency SOS">
+    <div class="sos-ring"></div>
+    <div class="sos-ring sos-ring-2"></div>
+    <i class="fas fa-bell"></i>
+    <span>SOS</span>
+  </button>
+
+  <!-- ========== FULLSCREEN MAP UI ========== -->
+  <button id="mapBackBtn" onclick="exitFullscreenMap()">
+    <i class="fas fa-arrow-left"></i> Back to Console
+  </button>
+
+  <div id="mapRouteChip">
+    <div class="chip-stat">
+      <span class="chip-label">DISTANCE</span>
+      <span class="chip-value mono" id="chipDistance">--</span>
+    </div>
+    <div class="chip-divider"></div>
+    <div class="chip-stat">
+      <span class="chip-label">ETA</span>
+      <span class="chip-value mono" id="chipDuration">--</span>
+    </div>
+    <div class="chip-divider"></div>
+    <div class="chip-stat">
+      <span class="chip-label">UNIT</span>
+      <span class="chip-value mono" id="chipVehicle">--</span>
+    </div>
+  </div>
+
+  <!-- ========== EMERGENCY CONTACTS ========== -->
   <section id="contacts" class="info-section">
-    <h2>🚨 Emergency Contacts</h2>
-    <div id="emergency-contacts" class="contacts-container"></div>
+    <div class="section-header">
+      <span class="section-tag">QUICK DIAL</span>
+      <h2 class="section-title">Emergency Contacts</h2>
+    </div>
+    <div id="emergency-contacts" class="contacts-grid"></div>
   </section>
 
+  <!-- ========== ABOUT SECTION ========== -->
   <section id="about" class="info-section about-section">
-    <h2>💡 About </h2>
-    <div class="about-content">
-      <div class="about-card"><i class="fas fa-bolt"></i>
+    <div class="section-header">
+      <span class="section-tag">PLATFORM INFO</span>
+      <h2 class="section-title">About DEVRP</h2>
+    </div>
+    <div class="about-grid">
+      <div class="about-card" style="--delay:0s">
+        <div class="about-card-icon"><i class="fas fa-bolt"></i></div>
         <h3>Dynamic Routing</h3>
-        <p>Fastest route based on real-time traffic and smart algorithms.</p>
+        <p>Fastest route based on real-time traffic and smart algorithms that adapt every second.</p>
       </div>
-      <div class="about-card"><i class="fas fa-satellite-dish"></i>
-        <h3>Real-Time Communication</h3>
-        <p>Coordinates with emergency services instantly.</p>
+      <div class="about-card" style="--delay:0.1s">
+        <div class="about-card-icon"><i class="fas fa-satellite-dish"></i></div>
+        <h3>Real-Time Comms</h3>
+        <p>Instantly coordinates with police, ambulance, and fire services simultaneously.</p>
       </div>
-      <div class="about-card"><i class="fa-solid fa-car-on"></i>
+      <div class="about-card" style="--delay:0.2s">
+        <div class="about-card-icon"><i class="fas fa-car-side"></i></div>
         <h3>Vehicle Tracking</h3>
-        <p>Live car tracking with accurate GPS updates.</p>
+        <p>Live GPS tracking with sub-second accuracy and route deviation alerts.</p>
       </div>
-      <div class="about-card center-card"><i class="fas fa-brain"></i>
-        <h3>AI & ML Integration</h3>
-        <p>Predicts safest and fastest emergency routes.</p>
+      <div class="about-card" style="--delay:0.3s">
+        <div class="about-card-icon"><i class="fas fa-brain"></i></div>
+        <h3>AI & ML Core</h3>
+        <p>Predictive models determine safest and fastest emergency corridors dynamically.</p>
       </div>
     </div>
-    <div class="about-footer">
-      <h3>Our Mission</h3>
-      <p>To save lives using technology and speed — when every second matters.</p>
+    <div class="about-mission">
+      <div class="mission-line"></div>
+      <div class="mission-content">
+        <h3>OUR MISSION</h3>
+        <p>To save lives using technology and speed — because every second matters.</p>
+      </div>
+      <div class="mission-line"></div>
     </div>
   </section>
 
-  <!-- Modern Toast Notification Container -->
+  <!-- ========== FOOTER ========== -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span class="footer-brand">🚨 DEVRP</span>
+      <span class="footer-sep">|</span>
+      <span>Dynamic Emergency Vehicle Route Planner</span>
+      <span class="footer-sep">|</span>
+      <span>© 2025 All Rights Reserved</span>
+    </div>
+  </footer>
+
+  <!-- ========== TOAST CONTAINER ========== -->
   <div id="notificationContainer" class="notification-container"></div>
 
-  <!-- Modern Modal Popup -->
+  <!-- ========== MODERN POPUP ========== -->
   <div id="modernPopup" class="modern-popup">
     <div class="modern-popup-content">
-      <button class="popup-close" onclick="closeModernPopup()">✕</button>
+      <button class="popup-close" onclick="closeModernPopup()">
+        <i class="fas fa-times"></i>
+      </button>
       <div class="popup-icon" id="popupIcon"></div>
       <h2 id="popupTitle"></h2>
       <p id="popupMessage"></p>
       <div class="popup-details" id="popupDetails"></div>
-      <button class="popup-btn" onclick="closeModernPopup()">OK</button>
+      <button class="popup-btn" onclick="closeModernPopup()">ACKNOWLEDGE</button>
     </div>
   </div>
 
-  <!-- Old Popup (Backup) -->
+  <!-- ========== HOSPITAL MODAL ========== -->
+  <div id="hospitalModal" class="hospital-modal">
+    <div class="hospital-modal-content">
+      <div class="hospital-modal-header">
+        <div class="hospital-header-left">
+          <span class="hospital-radar-dot"></span>
+          <div>
+            <h2>Nearby Hospitals</h2>
+            <p class="hospital-subtitle">Sorted by distance from your location</p>
+          </div>
+        </div>
+        <button class="hospital-close-btn" onclick="closeHospitalModal()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div id="hospitalList" class="hospital-list"></div>
+    </div>
+  </div>
+
+  <!-- ========== OLD POPUP BACKUP ========== -->
   <div id="popup" class="popup">
     <div class="popup-content">
       <span class="close" onclick="closePopup()">&times;</span>
       <p id="popup-text"></p>
-      <button class="btn" onclick="closePopup()">OK</button>
+      <button class="btn btn-primary" onclick="closePopup()">OK</button>
     </div>
   </div>
 
-  <footer>&copy; 2025 Dynamic Emergency Vehicle Route Planner</footer>
-
   <script src="script.js"></script>
   <script src="theme.js"></script>
-</body>
 
+</body>
 </html>
